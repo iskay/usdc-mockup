@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+:root {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  letter-spacing: 0.003em;
+
+  color-scheme: light dark;
+  color: #e6edf3;
+  background-color: #0b0c0f;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@theme {
+  --color-bg-dark: #07080a;
+  --color-foreground: #e6edf3;
+  --color-foreground-secondary: #c7d2da;
+  --color-sidebar-bg: #0d1115;
+  --color-sidebar-fg: #afc0c9;
+  --color-sidebar-active: #ffffff;
+  --color-sidebar-selected: #202429;
+  --color-border-muted: #26282c;
+  --color-card: #0e0f11;
+  --color-input: #0f1113;
+  --color-muted-fg: #8f99a3;
+}
+
+@utility input-style {
+  @apply w-full rounded-xl border border-border-muted bg-input py-4 pr-3 leading-none tracking-wide font-semibold placeholder:text-muted-fg outline-none focus:ring-2 focus:ring-emerald-500;
+}
+
+@utility info-text {
+  @apply mt-2 text-muted-fg text-[0.8em] font-medium;
+}
+
+@utility label-text {
+  @apply mb-2 text-foreground-secondary text-[0.85em] font-semibold;
+}
+
+@utility text-button {
+  @apply text-xs text-emerald-500/80 font-medium hover:text-foreground transition-colors;
+}
+
+@utility big-connect-button {
+  @apply bg-sidebar-bg text-sidebar-active hover:bg-muted-fg/20 border border-border-muted font-semibold;
+}
+
+@utility submit-button {
+  @apply bg-emerald-500/50 text-sidebar-active font-semibold;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
