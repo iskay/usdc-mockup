@@ -22,7 +22,7 @@ export const CardTitle: React.FC<React.HTMLAttributes<HTMLHeadingElement>> = ({
   className,
   ...props
 }) => (
-  <h3 className={`text-lg font-semibold ${className ?? ''}`} {...props} />
+  <h3 className={`text-lg font-semibold text-foreground ${className ?? ''}`} {...props} />
 )
 
 export default Card

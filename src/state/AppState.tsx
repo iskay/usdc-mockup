@@ -21,10 +21,25 @@ export type WalletConnections = {
 
 export type TxStatus = 'idle' | 'pending' | 'success' | 'error'
 
+export type TransactionPhase = 'submitting' | 'pending' | 'success' | 'error'
+export type Transaction = {
+  id: string
+  kind: 'deposit' | 'send'
+  amount: string
+  fromChain?: string
+  toChain?: string
+  destination?: string
+  hash?: string
+  status: TransactionPhase
+  createdAt: number
+  updatedAt: number
+}
+
 export type AppState = {
   balances: ChainBalances
   walletConnections: WalletConnections
   txStatus: TxStatus
+  transactions: Transaction[]
   addresses: {
     ethereum: string
     base: string
@@ -40,6 +55,8 @@ type AppAction =
   | { type: 'SET_WALLET_CONNECTION'; payload: Partial<WalletConnections> }
   | { type: 'SET_TX_STATUS'; payload: TxStatus }
   | { type: 'SET_ADDRESSES'; payload: AppState['addresses'] }
+  | { type: 'ADD_TRANSACTION'; payload: Transaction }
+  | { type: 'UPDATE_TRANSACTION'; payload: { id: string; changes: Partial<Transaction> } }
 
 const initialState: AppState = {
   balances: {
@@ -55,6 +72,7 @@ const initialState: AppState = {
     namada: 'disconnected',
   },
   txStatus: 'idle',
+  transactions: [],
   addresses: {
     ethereum: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
     base: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
@@ -79,6 +97,15 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, txStatus: action.payload }
     case 'SET_ADDRESSES':
       return { ...state, addresses: action.payload }
+    case 'ADD_TRANSACTION':
+      return { ...state, transactions: [action.payload, ...state.transactions] }
+    case 'UPDATE_TRANSACTION':
+      return {
+        ...state,
+        transactions: state.transactions.map((tx) =>
+          tx.id === action.payload.id ? { ...tx, ...action.payload.changes, updatedAt: Date.now() } : tx
+        ),
+      }
     default:
       return state
   }

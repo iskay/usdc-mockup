@@ -17,6 +17,16 @@
 }
 
 @theme {
+  --animate-ping: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite alternate;
+  @keyframes ping {
+    75%, 100% {
+      transform: scale(1.5);
+      opacity: 0.5;
+    }
+  }
+}
+
+@theme {
   --color-bg-dark: #07080a;
   --color-foreground: #e6edf3;
   --color-foreground-secondary: #c7d2da;
