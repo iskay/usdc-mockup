@@ -22,7 +22,7 @@ export const ConnectionButton: React.FC<ConnectionButtonProps> = ({
     <button
       type="button"
       onClick={onToggle}
-      className="inline-flex items-center gap-2 rounded-md font-semibold border border-muted-fg/50 bg-foreground/20 px-3 py-2 text-sm text-foreground hover:bg-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+      className="inline-flex items-center gap-2 rounded-md font-semibold border border-muted-fg/50 bg-foreground/20 px-3 py-2 text-sm text-foreground hover:bg-foreground/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-green"
     >
       <img src={logoUrl} alt="" className="h-4 w-4" />
       <span>{buttonText}</span>

@@ -19,15 +19,22 @@ export const Tabs: React.FC<TabsProps> = ({ items, value, onChange, className })
   }
 
   return (
-    <div className={`inline-flex rounded-xl bg-[#0e1114] p-1 ${className ?? ''}`}>
-      {items.map((t) => {
+    <div className={`inline-flex bg-header-bg p-0 ${className ?? ''}`}>
+      {items.map((t, index) => {
         const isActive = t.key === active
+        const isFirst = index === 0
+        const isLast = index === items.length - 1
+        
         return (
           <button
             key={t.key}
             onClick={() => handleChange(t.key)}
-            className={`px-3 py-1 text-sm font-medium rounded-md ${
-              isActive ? 'bg-emerald-500/40 text-sidebar-active' : 'text-foreground-secondary hover:bg-sidebar-selected'
+            className={`px-4 py-1 text-sm font-medium border-b border-transparent ${
+              isFirst ? 'rounded-bl-xs rounded-tl-xs' : ''
+            } ${
+              isLast ? 'rounded-br-xs rounded-tr-xs' : ''
+            } ${
+              isActive ? 'bg-accent-yellow text-accent-yellow-text' : 'text-title hover:border-b-title/80 hover:rounded-none'
             }`}
           >
             {t.label}

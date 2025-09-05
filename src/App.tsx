@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import './App.css'
-import { Sidebar } from './components/layout/Sidebar'
 import { Header } from './components/layout/Header'
+import { Footer } from './components/layout/Footer'
 import BridgeForm from './features/bridge/BridgeForm'
 import HistoryPage from './features/history/HistoryPage'
 import SettingsPage from './features/settings/SettingsPage'
+import { CircleBg, PixelBg } from './components/layout/Pixels'
 
 type ChainBalances = {
   [chain: string]: {
@@ -45,16 +46,15 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-dark">
-      <div className="flex">
-        <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
-        <div className="flex min-h-screen flex-1 flex-col">
-          <Header />
-          <main className="mx-auto w-full max-w-5xl p-4">
-            {renderPage()}
-          </main>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[radial-gradient(ellipse_at_80%_20%,_#13343f_0%,_#0e2730_50%,_#0c151a_100%)] flex flex-col relative overflow-hidden">
+      <Header activeTab={activeTab} onTabChange={setActiveTab} />
+      <div className="bg-dot-grid fixed inset-0 z-[1] mt-2" />
+      <PixelBg />
+      <CircleBg />
+      <main className="mx-auto w-full max-w-5xl p-4 pt-12 flex-1 z-[10]">
+        {renderPage()}
+      </main>
+      <Footer />
     </div>
   )
 }

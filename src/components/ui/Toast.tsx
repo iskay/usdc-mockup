@@ -51,10 +51,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 }
 
 const variantClasses: Record<ToastVariant, string> = {
-  success: 'bg-emerald-900 text-white border-border-muted',
-  error: 'bg-red-900 text-white border-border-muted',
-  info: 'bg-slate-800 text-white border-border-muted',
-  warning: 'bg-yellow-900 text-white border-border-muted',
+  success: 'bg-header-bg text-accent-green border-[#73e767]',
+  error: 'bg-header-bg text-accent-red border-accent-red',
+  info: 'bg-header-bg text-muted-fg border-button-text-inactive',
+  warning: 'bg-header-bg text-accent-yellow border-accent-yellow-desat',
 }
 
 const variantIcons: Record<ToastVariant, string> = {
@@ -79,13 +79,13 @@ export const Toaster: React.FC = () => {
                 <i className={`${variantIcons[t.variant ?? 'info']} text-lg`}></i>
               </div>
               <div className="flex-1">
-                {t.title ? <div className="text-md text-left font-bold text-foreground">{t.title}</div> : null}
-                <div className="text-md text-left text-foreground leading-snug">{t.message}</div>
+                {t.title ? <div className="text-md text-left font-bold text-title">{t.title}</div> : null}
+                <div className="text-md text-left text-title leading-snug">{t.message}</div>
               </div>
               <button
                 type="button"
                 onClick={() => dismissToast(t.id)}
-                className="text-foreground/80 hover:text-foreground"
+                className="text-muted-fg hover:text-muted-fg/80"
               >
                 <i className="fa-solid fa-xmark"></i>
               </button>

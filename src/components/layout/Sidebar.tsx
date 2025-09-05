@@ -23,7 +23,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onTabChange }) => {
     <aside className="hidden md:flex w-80 shrink-0 flex-col gap-6 bg-sidebar-bg p-8">
       <div className="mb-2 flex items-center gap-4 px-2 text-[1.3em] text-sidebar-fg font-semibold">
         <i className="fa-solid fa-bridge-lock text-sidebar-fg text-xl" />
-        USDC Dot Delivery
+        PixelPay
       </div>
       <nav className="flex flex-col gap-4 pl-4">
         {nav.map((n) => {

@@ -1,19 +1,21 @@
 @import "tailwindcss";
 
 :root {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.6;
   font-weight: 400;
   letter-spacing: 0.003em;
 
   color-scheme: light dark;
-  color: #e6edf3;
-  background-color: #0b0c0f;
+  color: #f7fff8;
+  background-color: #0b1722;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+
+  overflow-x: hidden;
 }
 
 @theme {
@@ -27,21 +29,65 @@
 }
 
 @theme {
+  --animate-spin-slow: spin 1000s linear infinite;
+  @keyframes spin-slow {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+@theme {
+  --animate-spin-slow2: spin 1400s linear infinite reverse;
+  @keyframes spin-slow2 {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+@theme {
+  --animate-spin-slow3: spin 800s linear infinite;
+  @keyframes spin-slow3 {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+@theme {
   --color-bg-dark: #07080a;
-  --color-foreground: #e6edf3;
-  --color-foreground-secondary: #c7d2da;
   --color-sidebar-bg: #0d1115;
   --color-sidebar-fg: #afc0c9;
   --color-sidebar-active: #ffffff;
   --color-sidebar-selected: #202429;
-  --color-border-muted: #26282c;
-  --color-card: #0e0f11;
-  --color-input: #0f1113;
-  --color-muted-fg: #8f99a3;
+  
+
+  --color-base: #0a2638;
+  --color-card: #0b1722;
+  --color-accent-yellow: #ffde44;
+  --color-accent-yellow-desat: #f5dc6e;
+  --color-accent-yellow-text: #4b431e;
+  --color-accent-green: #7fff6f;
+  --color-accent-red: #ff6b6b;
+  --color-foreground: #a1e8ea;
+  --color-foreground-secondary: #a1e8ea;
+  --color-muted-fg: #d0e8e1;
+  --color-border-muted: #88cad9;
+  --color-input: #101c22;
+  --color-card-border: #88cad9;
+  --color-header-bg: #0b1722;
+  --color-header-border: #80becc;
+  --color-header-fg: #c7f2ea;
+  --color-title: #f7fff8;
+  --color-button-active: #28eec1;
+  --color-button-text-active: #011c1b;
+  --color-button-inactive: #0a2a3e;
+  --color-button-text-inactive: #c7f2e8;
 }
 
 @utility input-style {
-  @apply w-full rounded-xl border border-border-muted bg-input py-4 pr-3 leading-none tracking-wide font-semibold placeholder:text-muted-fg outline-none focus:ring-2 focus:ring-emerald-500;
+  @apply w-full rounded-xl border border-border-muted bg-input py-4 pr-3 leading-none tracking-wide font-semibold placeholder:text-muted-fg outline-none focus:ring-2 focus:border-card;
 }
 
 @utility info-text {
@@ -53,19 +99,45 @@
 }
 
 @utility text-button {
-  @apply text-xs text-emerald-500/80 font-medium hover:text-foreground transition-colors;
+  @apply text-xs text-accent-yellow font-medium hover:text-accent-yellow/80 transition-colors;
 }
 
 @utility big-connect-button {
-  @apply bg-sidebar-bg text-sidebar-active hover:bg-muted-fg/20 border border-border-muted font-semibold;
+  @apply bg-button-inactive hover:bg-button-text-inactive/20 border border-button-text-inactive font-semibold;
 }
 
 @utility submit-button {
-  @apply bg-emerald-500/50 text-sidebar-active font-semibold;
+  @apply bg-accent-green hover:bg-accent-green/80 text-button-text-active border border-transparent;
+}
+
+@utility help-button {
+  @apply bg-transparent text-header-fg hover:bg-header-fg/10 border border-header-fg/20;
+}
+
+@utility navbutton-active {
+  @apply bg-button-active hover:bg-button-active/90 text-button-text-active border border-transparent;
+}
+
+@utility navbutton-inactive {
+  @apply bg-button-inactive hover:bg-button-text-inactive/20 border border-button-text-inactive text-button-text-inactive;
 }
 
 body {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(173,216,230,0.2) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+.pixel {
+  animation: bob 3s ease-in-out infinite;
 }

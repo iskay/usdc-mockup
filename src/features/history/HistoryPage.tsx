@@ -1,6 +1,7 @@
 import React from 'react'
 import { Card, CardHeader, CardTitle } from '../../components/ui/Card'
 import { useAppState } from '../../state/AppState'
+import Spinner from '../../components/ui/Spinner'
 
 export const HistoryPage: React.FC = () => {
   const { state } = useAppState()
@@ -21,11 +22,18 @@ export const HistoryPage: React.FC = () => {
         ) : (
           <div className="divide-y divide-border-muted">
             {txs.map((tx) => {
-              const dot = tx.status === 'success' ? 'bg-emerald-500' : tx.status === 'pending' ? 'bg-yellow-500 animate-ping' : tx.status === 'submitting' ? 'bg-sky-500 animate-ping' : 'bg-red-500'
               const label = tx.kind === 'deposit' ? `${tx.fromChain} → Namada` : `Namada → ${tx.toChain}`
               return (
                 <div key={tx.id} className="flex items-start gap-4 p-4">
-                  <span className={`mt-1 h-2.5 w-2.5 rounded-full ${dot}`}></span>
+                  <span className="mt-1">
+                    {tx.status === 'success' ? (
+                      <i className="fa-solid fa-check-circle text-accent-green"></i>
+                    ) : tx.status === 'error' ? (
+                      <i className="fa-solid fa-circle-exclamation text-accent-red"></i>
+                    ) : (
+                      <Spinner size="sm" variant="accent" />
+                    )}
+                  </span>
                   <div className="flex-1">
                     <div className="flex justify-between">
                       <div className="text-sm font-semibold text-foreground">{tx.kind.toUpperCase()} • {tx.amount} USDC</div>

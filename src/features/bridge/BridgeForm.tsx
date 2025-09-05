@@ -6,6 +6,8 @@ import { Input } from '../../components/ui/Input'
 import { Button } from '../../components/ui/Button'
 import { useAppState } from '../../state/AppState'
 import { useToast } from '../../components/ui/Toast'
+import { PixelRow, pixelColors } from '../../components/layout/Pixels'
+import Spinner from '../../components/ui/Spinner'
 
 type ChainBalances = {
   [chain: string]: {
@@ -78,7 +80,7 @@ export const BridgeForm: React.FC = () => {
         setDepositTx((t) => ({ ...t, status: 'success' }))
       }
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success' } } })
-      showToast({ title: 'Deposit', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0,6)+'…'+toNow.slice(-4) : 'Namada'}`, variant: 'success' })
+      showToast({ title: 'Deposit', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0, 6) + '…' + toNow.slice(-4) : 'Namada'}`, variant: 'success' })
     }, 30000)
   }
 
@@ -124,7 +126,7 @@ export const BridgeForm: React.FC = () => {
         setSendTx((t) => ({ ...t, status: 'success' }))
       }
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success' } } })
-      showToast({ title: 'Send', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0,6)+'…'+toNow.slice(-4) : chains.find(c=>c.value===toChain)?.label}`, variant: 'success' })
+      showToast({ title: 'Send', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0, 6) + '…' + toNow.slice(-4) : chains.find(c => c.value === toChain)?.label}`, variant: 'success' })
     }, 30000)
   }
 
@@ -171,17 +173,23 @@ export const BridgeForm: React.FC = () => {
   const renderDepositSection = () => (
     <div className="space-y-6 text-left">
       <div>
+        <div className="flex gap-2 items-end mt-[-1em] text-title font-bold text-2xl">
+          <div>Shield USDC from any EVM chain with one click</div>
+          <div className="mb-2"><PixelRow size={7} /></div>
+        </div>
+        <div className="mb-10 text-sm text-accent-green">Deposit USDC into Namada's shielded pool to earn rewards and make fully-private transactions</div>
         <div className="label-text">Deposit</div>
         <Input
           placeholder="Enter an amount"
           value={depositAmount}
           onChange={(e) => setDepositAmount(e.target.value)}
           disabled={depositTx.status !== 'idle'}
+          left={<i className="fa-regular fa-paper-plane text-muted-fg/80"></i>}
           rightSize="lg"
           right={
             <span className="inline-flex items-center gap-2 text-muted-fg">
               <img src="/usdc-logo.svg" className="h-5 w-5" alt="USDC" />
-              <span className="text-xs font-semibold text-foreground">USDC</span>
+              <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
                 onClick={() => setDepositAmount(getAvailableBalance(fromChain))}
@@ -220,7 +228,7 @@ export const BridgeForm: React.FC = () => {
             Auto Fill
           </button>
         </div>
-        <Input placeholder="tnam..." value={depositAddress} onChange={(e) => setDepositAddress(e.target.value)} disabled={depositTx.status !== 'idle'} />
+        <Input placeholder="tnam..." value={depositAddress} onChange={(e) => setDepositAddress(e.target.value)} disabled={depositTx.status !== 'idle'} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
         {(() => {
           const validation = validateForm(depositAmount, getAvailableBalance(fromChain), depositAddress)
           return validation.addressError && depositAddress !== '' ? (
@@ -235,14 +243,14 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-gas-pump text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated fees</div>
           </div>
-          <span className="info-text font-semibold text-foreground">$2.14</span>
+          <span className="info-text font-semibold text-muted-fg">$2.14</span>
         </div>
         <div className="flex justify-between">
           <div className="flex gap-2 items-baseline">
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated deposit time</div>
           </div>
-          <span className="info-text font-semibold text-foreground">20 - 25 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">20 - 25 minutes</span>
         </div>
       </div>
 
@@ -269,7 +277,7 @@ export const BridgeForm: React.FC = () => {
             <div className="flex justify-center">
               <Button
                 variant="big-connect"
-                leftIcon={<img src={selected?.iconUrl ?? '/ethereum-logo.svg'} alt="" className="h-4 w-4" />}
+                leftIcon={<img src={selected?.iconUrl ?? '/ethereum-logo.svg'} alt="" className="h-5 w-5" />}
                 onClick={() =>
                   dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connected' } })
                 }
@@ -283,7 +291,14 @@ export const BridgeForm: React.FC = () => {
         if (depositTx.status === 'idle') {
           return (
             <div className="flex justify-center">
-              <Button variant="submit" disabled={!validation.isValid} onClick={startDepositSimulation}>Deposit USDC</Button>
+              <Button
+                variant="submit"
+                disabled={!validation.isValid}
+                onClick={startDepositSimulation}
+                leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
+              >
+                Deposit USDC
+              </Button>
             </div>
           )
         }
@@ -291,24 +306,23 @@ export const BridgeForm: React.FC = () => {
         const statusText =
           depositTx.status === 'submitting' ? 'Submitting transaction...'
             : depositTx.status === 'pending' ? 'Pending confirmation...'
-            : 'Success'
-
-        const dotClass =
-          depositTx.status === 'success' ? 'bg-emerald-500'
-            : depositTx.status === 'pending' ? 'bg-yellow-500 animate-ping'
-            : 'bg-sky-500 animate-ping'
+              : 'Success'
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`}></span>
+                {depositTx.status === 'success' ? (
+                  <i className="fa-solid fa-check-circle text-accent-green"></i>
+                ) : (
+                  <Spinner size="sm" variant="accent" />
+                )}
                 <div className="text-sm font-semibold text-foreground">{statusText}</div>
               </div>
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{depositAmount} USDC</span></div>
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground">{shorten(depositAddress)}</span></div>
-                <div className="flex justify-between"><span>From</span><span className="font-semibold text-foreground">{chains.find(c=>c.value===fromChain)?.label} → Namada</span></div>
+                <div className="flex justify-between"><span>From</span><span className="font-semibold text-foreground">{chains.find(c => c.value === fromChain)?.label} → Namada</span></div>
                 <div className="flex justify-between"><span>Tx Hash</span><span className="font-mono text-xs text-foreground">{depositTx.hash?.slice(0, 10)}...{depositTx.hash?.slice(-8)}</span></div>
               </div>
             </div>
@@ -326,17 +340,23 @@ export const BridgeForm: React.FC = () => {
     <div className="space-y-6 text-left">
 
       <div>
+        <div className="flex gap-2 items-end mt-[-1em] text-title font-bold text-2xl">
+          <div>Send USDC to any EVM chain privately</div>
+          <div className="mb-2"><PixelRow size={7} /></div>
+        </div>
+        <div className="mb-10 text-sm text-accent-green">Make fully-private payments from Namada's shielded pool to the destination of your choice</div>
         <div className="label-text">Send</div>
         <Input
           placeholder="Enter an amount"
           value={sendAmount}
           onChange={(e) => setSendAmount(e.target.value)}
           disabled={sendTx.status !== 'idle'}
+          left={<i className="fa-regular fa-paper-plane text-muted-fg/80"></i>}
           rightSize="lg"
           right={
             <span className="inline-flex items-center gap-2 text-muted-fg">
               <img src="/usdc-logo.svg" className="h-5 w-5" alt="USDC" />
-              <span className="text-xs font-semibold text-foreground">USDC</span>
+              <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
                 onClick={() => setSendAmount(state.balances.namada.usdcShielded)}
@@ -367,7 +387,7 @@ export const BridgeForm: React.FC = () => {
             Auto Fill
           </button>
         </div>
-        <Input placeholder="0x..." value={sendAddress} onChange={(e) => setSendAddress(e.target.value)} disabled={sendTx.status !== 'idle'} />
+        <Input placeholder="0x..." value={sendAddress} onChange={(e) => setSendAddress(e.target.value)} disabled={sendTx.status !== 'idle'} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
         {(() => {
           const validation = validateForm(sendAmount, state.balances.namada.usdcShielded, sendAddress)
           return validation.addressError && sendAddress !== '' ? (
@@ -387,14 +407,14 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-gas-pump text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated fees</div>
           </div>
-          <span className="info-text font-semibold text-foreground">$0.12</span>
+          <span className="info-text font-semibold text-muted-fg">$0.12</span>
         </div>
         <div className="flex justify-between">
           <div className="flex gap-2 items-baseline">
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated send time</div>
           </div>
-          <span className="info-text font-semibold text-foreground">5 - 10 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">5 - 10 minutes</span>
         </div>
       </div>
 
@@ -407,7 +427,7 @@ export const BridgeForm: React.FC = () => {
             <div className="flex justify-center">
               <Button
                 variant="big-connect"
-                leftIcon={<img src='/namada-logo.svg' alt="" className="h-4 w-4" />}
+                leftIcon={<img src='/namada-logo.svg' alt="" className="h-5 w-5" />}
                 onClick={() =>
                   dispatch({
                     type: 'SET_WALLET_CONNECTION',
@@ -424,7 +444,7 @@ export const BridgeForm: React.FC = () => {
         if (sendTx.status === 'idle') {
           return (
             <div className="flex justify-center">
-              <Button variant="submit" disabled={!validation.isValid} onClick={startSendSimulation}>Send USDC</Button>
+              <Button variant="submit" disabled={!validation.isValid} onClick={startSendSimulation} leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}>Send USDC</Button>
             </div>
           )
         }
@@ -432,24 +452,23 @@ export const BridgeForm: React.FC = () => {
         const statusText =
           sendTx.status === 'submitting' ? 'Submitting transaction...'
             : sendTx.status === 'pending' ? 'Pending confirmation...'
-            : 'Success'
-
-        const dotClass =
-          sendTx.status === 'success' ? 'bg-emerald-500'
-            : sendTx.status === 'pending' ? 'bg-yellow-500'
-            : 'bg-sky-500'
+              : 'Success'
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${dotClass}`}></span>
+                {sendTx.status === 'success' ? (
+                  <i className="fa-solid fa-check-circle text-accent-green"></i>
+                ) : (
+                  <Spinner size="sm" variant="accent" />
+                )}
                 <div className="text-sm font-semibold text-foreground">{statusText}</div>
               </div>
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{sendAmount} USDC</span></div>
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground">{shorten(sendAddress)}</span></div>
-                <div className="flex justify-between"><span>On chain</span><span className="font-semibold text-foreground">{chains.find(c=>c.value===toChain)?.label}</span></div>
+                <div className="flex justify-between"><span>On chain</span><span className="font-semibold text-foreground">{chains.find(c => c.value === toChain)?.label}</span></div>
                 <div className="flex justify-between"><span>Tx Hash</span><span className="font-mono text-xs text-foreground">{sendTx.hash?.slice(0, 10)}...{sendTx.hash?.slice(-8)}</span></div>
               </div>
             </div>
@@ -482,22 +501,25 @@ export const BridgeForm: React.FC = () => {
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between w-full">
+            <div className="flex gap-2 items-center">
+            <i className="fa-solid fa-shield text-title"></i>
             <div className="text-md font-semibold">USDC Balances on Namada</div>
+            </div>
             <div className="flex items-center gap-3">
               {/* Sync status indicator - placeholder: green */}
               <div className="flex items-center gap-2">
                 <span
                   className={`h-2.5 w-2.5 rounded-full ${shieldSyncStatus === 'green'
-                      ? 'bg-emerald-500'
-                      : shieldSyncStatus === 'yellow'
-                        ? 'bg-yellow-500'
-                        : 'bg-red-500'
+                    ? 'bg-accent-green'
+                    : shieldSyncStatus === 'yellow'
+                      ? 'bg-yellow-500'
+                      : 'bg-accent-red'
                     }`}
                 ></span>
               </div>
               <Button
                 variant="ghost"
-                size="sm"
+                size="xs"
                 leftIcon={<i className="fas fa-rotate text-sm"></i>}
                 onClick={() =>
                   setShieldSyncStatus(
@@ -516,28 +538,28 @@ export const BridgeForm: React.FC = () => {
             <div className="label-text mb-0 w-24 text-left">Transparent:</div>
             <div className="flex gap-2 items-center">
               <img src="/usdc-logo.svg" alt="USDC" className="h-5 w-5" />
-              <div className="leading-none tracking-wide font-semibold text-foreground">{state.balances.namada.usdcTransparent} USDC</div>
+              <div className="leading-none tracking-wide font-semibold text-[#01daab]">{state.balances.namada.usdcTransparent} USDC</div>
             </div>
             <div className="flex">
-            <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={<i className="fas fa-shield text-sm"></i>}
-              onClick={() =>
-                setShieldSyncStatus(
-                  shieldSyncStatus === 'green' ? 'yellow' : shieldSyncStatus === 'yellow' ? 'red' : 'green'
-                )
-              }
-            >
-              Shield Now
-            </Button>
+              <Button
+                variant="primary"
+                size="xs"
+                leftIcon={<i className="fas fa-shield text-sm"></i>}
+                onClick={() =>
+                  setShieldSyncStatus(
+                    shieldSyncStatus === 'green' ? 'yellow' : shieldSyncStatus === 'yellow' ? 'red' : 'green'
+                  )
+                }
+              >
+                Shield Now
+              </Button>
             </div>
           </div>
           <div className="flex justify-start items-center gap-4">
             <div className="label-text mb-0 pt-1 w-24 text-left">Shielded:</div>
             <div className="flex gap-2 items-center">
               <img src="/usdc-logo.svg" alt="USDC" className="h-5 w-5" />
-              <div className="leading-none tracking-wide font-semibold text-foreground">{state.balances.namada.usdcShielded} USDC</div>
+              <div className="leading-none tracking-wide font-semibold text-[#e7bc59]">{state.balances.namada.usdcShielded} USDC</div>
             </div>
           </div>
 

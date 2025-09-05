@@ -4,7 +4,7 @@ type CardProps = React.HTMLAttributes<HTMLDivElement>
 
 export const Card: React.FC<CardProps> = ({ className, ...props }) => (
   <div
-    className={`rounded-3xl border border-border-muted bg-card p-6 mx-8 ${
+    className={`rounded-3xl border border-card-border bg-card p-8 pt-4 mx-8 ${
       className ?? ''
     }`}
     {...props}

@@ -52,14 +52,14 @@ export function SelectMenu<T extends string | number = string>({
       >
         <span className="inline-flex items-center gap-2">
           {selected?.iconUrl ? (
-            <img src={selected.iconUrl} alt="" className="h-4 w-4" />
+            <img src={selected.iconUrl} alt="" className="h-5 w-5" />
           ) : null}
           <span>{selected?.label ?? placeholder ?? 'Select'}</span>
         </span>
         <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-muted-fg">▾</span>
       </button>
       {open ? (
-        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-border-muted bg-sidebar-bg p-1 shadow-lg">
+        <div className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded-md border border-foreground/40 bg-sidebar-bg p-1 shadow-lg">
           {options.map((o) => {
             const isActive = String(o.value) === String(value)
             return (
@@ -71,10 +71,10 @@ export function SelectMenu<T extends string | number = string>({
                   setOpen(false)
                 }}
                 className={`flex w-full items-center gap-2 rounded-sm px-2 py-2 text-left text-sm ${
-                  isActive ? 'bg-sidebar-selected text-sidebar-active' : 'text-foreground-secondary hover:bg-emerald-600/60'
+                  isActive ? 'border border-button-active text-title font-bold' : 'text-title hover:bg-base/20'
                 }`}
               >
-                {o.iconUrl ? <img src={o.iconUrl} alt="" className="h-4 w-4" /> : null}
+                {o.iconUrl ? <img src={o.iconUrl} alt="" className="h-5 w-5" /> : null}
                 <span>{o.label}</span>
               </button>
             )
