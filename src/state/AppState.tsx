@@ -9,6 +9,7 @@ export type ChainBalances = {
   base: { usdc: string }
   polygon: { usdc: string }
   arbitrum: { usdc: string }
+  sepolia: { usdc: string }
   // kept for backward compatibility in places still using "noble"
   noble?: { usdc: string }
   namada: { usdcTransparent: string; usdcShielded: string }
@@ -45,6 +46,7 @@ export type AppState = {
     base: string
     polygon: string
     arbitrum: string
+    sepolia: string
     namada: { transparent: string; shielded: string }
   }
 }
@@ -60,12 +62,13 @@ type AppAction =
 
 const initialState: AppState = {
   balances: {
-    ethereum: { usdc: '1245.80' },
-    base: { usdc: '890.45' },
-    polygon: { usdc: '567.23' },
-    arbitrum: { usdc: '342.11' },
-    noble: { usdc: '1245.80' },
-    namada: { usdcTransparent: '321.00', usdcShielded: '924.80' },
+    ethereum: { usdc: '--' },
+    base: { usdc: '--' },
+    polygon: { usdc: '--' },
+    arbitrum: { usdc: '--' },
+    sepolia: { usdc: '--' },
+    noble: { usdc: '--' },
+    namada: { usdcTransparent: '--', usdcShielded: '924.80' },
   },
   walletConnections: {
     metamask: 'disconnected',
@@ -74,12 +77,13 @@ const initialState: AppState = {
   txStatus: 'idle',
   transactions: [],
   addresses: {
-    ethereum: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
-    base: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
-    polygon: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
-    arbitrum: '0x9F3537C9C0A2cA1B7C0cF2F7b0D0d176762AE8f1',
+    ethereum: '',
+    base: '',
+    polygon: '',
+    arbitrum: '',
+    sepolia: '',
     namada: {
-      transparent: 'tnam1qrv5y9p4u7t0z9s8x3k4hd2l6m8n0p2q4r6s8t',
+      transparent: '',
       shielded: 'znam1z8y7x6w5v4u3t2s1r0q9p8o7n6m5l4k3j2h1g',
     },
   },

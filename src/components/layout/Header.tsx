@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { Button } from '../ui/Button'
 import { SidebarButton } from '../ui/SidebarButton'
 import { useToast } from '../ui/Toast'
+import { useNamadaKeychain } from '../../utils/namada'
 import { useAppState } from '../../state/AppState'
 
 type NavItem = { label: string; icon: string; key: string }
@@ -23,6 +24,13 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const hasInProgressTx = state.transactions.some(tx => tx.status === 'submitting' || tx.status === 'pending')
   const [openConnect, setOpenConnect] = useState(false)
   const connectRef = useRef<HTMLDivElement | null>(null)
+  const hasAutoReconnected = useRef(false)
+  const addressesRef = useRef(state.addresses)
+  const { connect: connectNamada, disconnect: disconnectNamada, checkConnection: checkNamada, getDefaultAccount, isAvailable: isNamadaAvailable } = useNamadaKeychain()
+
+  useEffect(() => {
+    addressesRef.current = state.addresses
+  }, [state.addresses])
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -33,6 +41,247 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
+
+  // --- MetaMask + Namada integration ---
+  useEffect(() => {
+    if (hasAutoReconnected.current) return
+
+    // Silent MetaMask reconnect
+    ;(async () => {
+      try {
+        if (!window.ethereum) return
+        console.log('Checking for existing MetaMask connection...')
+        const accounts: string[] = await window.ethereum!.request({ method: 'eth_accounts' })
+        console.log('MetaMask accounts found:', accounts)
+        if (accounts && accounts.length > 0) {
+          const account = accounts[0]
+          console.log('MetaMask account:', account)
+          dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connected' } })
+          dispatch({
+            type: 'SET_ADDRESSES',
+            payload: {
+              ...addressesRef.current,
+              ethereum: account,
+              base: account,
+              sepolia: account,
+            },
+          })
+          showToast({ title: 'MetaMask', message: `Reconnected: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'success' })
+        } else {
+          console.log('No existing MetaMask connection found')
+        }
+      } catch (error) {
+        console.log('Error checking existing MetaMask connection:', error)
+      }
+    })()
+
+    // Silent Namada reconnect
+    ;(async () => {
+      try {
+        console.log('Checking for existing Namada connection...')
+        const available = await isNamadaAvailable()
+        if (!available) {
+          console.log('Namada extension not available')
+          return
+        }
+        const connected = await checkNamada()
+        if (connected) {
+          console.log('Found existing Namada connection')
+          const acct = await getDefaultAccount()
+          dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
+          if (acct?.address) {
+            dispatch({
+              type: 'SET_ADDRESSES',
+              payload: {
+                ...addressesRef.current,
+                namada: { ...addressesRef.current.namada, transparent: acct.address },
+              },
+            })
+            console.log('Namada account:', acct)
+          }
+          showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
+        } else {
+          console.log('No existing Namada connection found')
+        }
+      } catch (e) {
+        console.log('Error checking existing Namada connection:', e)
+      }
+    })()
+
+    hasAutoReconnected.current = true
+
+    const handleAccountsChanged = (accounts: string[]) => {
+      if (!accounts || accounts.length === 0) {
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'disconnected' } })
+        dispatch({
+          type: 'SET_ADDRESSES',
+          payload: {
+            ...addressesRef.current,
+            ethereum: '',
+            base: '',
+            sepolia: '',
+          },
+        })
+        // Clear EVM balances when accounts are disconnected
+        dispatch({
+          type: 'SET_BALANCES',
+          payload: {
+            ...state.balances,
+            ethereum: { usdc: '--' },
+            base: { usdc: '--' },
+            sepolia: { usdc: '--' },
+            polygon: { usdc: '--' },
+            arbitrum: { usdc: '--' },
+          },
+        })
+        showToast({ title: 'MetaMask', message: 'Disconnected', variant: 'warning' })
+      } else {
+        const account = accounts[0]
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connected' } })
+        dispatch({
+          type: 'SET_ADDRESSES',
+          payload: {
+            ...addressesRef.current,
+            ethereum: account,
+            base: account,
+            sepolia: account,
+          },
+        })
+        showToast({ title: 'MetaMask', message: `Account: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'info' })
+      }
+    }
+
+    const handleChainChanged = () => {
+      showToast({ title: 'Network Changed', message: 'MetaMask network changed', variant: 'info' })
+    }
+
+    window.ethereum?.on?.('accountsChanged', handleAccountsChanged)
+    window.ethereum?.on?.('chainChanged', handleChainChanged)
+
+    return () => {
+      window.ethereum?.removeListener?.('accountsChanged', handleAccountsChanged)
+      window.ethereum?.removeListener?.('chainChanged', handleChainChanged)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const connectMetaMask = async () => {
+    try {
+      if (!window.ethereum) {
+        showToast({ title: 'MetaMask Not Found', message: 'Please install the MetaMask extension', variant: 'error' })
+        return
+      }
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connecting' } })
+      const accounts: string[] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+      if (accounts && accounts.length > 0) {
+        const account = accounts[0]
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connected' } })
+        dispatch({
+          type: 'SET_ADDRESSES',
+          payload: {
+            ...addressesRef.current,
+            ethereum: account,
+            base: account,
+            sepolia: account,
+          },
+        })
+        showToast({ title: 'MetaMask Connected', message: `Connected: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'success' })
+      } else {
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'disconnected' } })
+      }
+    } catch (err: any) {
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'error' } })
+      showToast({ title: 'Connection Failed', message: err?.message ?? 'Unable to connect MetaMask', variant: 'error' })
+    } finally {
+      setOpenConnect(false)
+    }
+  }
+
+  const disconnectMetaMask = async () => {
+    try {
+      if (window.ethereum) {
+        try {
+          await window.ethereum.request({ method: 'wallet_revokePermissions', params: [{ eth_accounts: {} }] as any })
+          showToast({ title: 'MetaMask', message: 'Disconnected from app', variant: 'success' })
+        } catch {
+          showToast({ title: 'MetaMask', message: 'Disconnected locally (revoke not supported)', variant: 'info' })
+        }
+      }
+    } finally {
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'disconnected' } })
+      dispatch({
+        type: 'SET_ADDRESSES',
+        payload: {
+          ...addressesRef.current,
+          ethereum: '',
+          base: '',
+          sepolia: '',
+        },
+      })
+      // Clear EVM balances when disconnecting
+      dispatch({
+        type: 'SET_BALANCES',
+        payload: {
+          ...state.balances,
+          ethereum: { usdc: '--' },
+          base: { usdc: '--' },
+          sepolia: { usdc: '--' },
+          polygon: { usdc: '--' },
+          arbitrum: { usdc: '--' },
+        },
+      })
+      setOpenConnect(false)
+    }
+  }
+
+  const handleToggleMetaMask = () => {
+    if (state.walletConnections.metamask === 'connected') {
+      void disconnectMetaMask()
+    } else {
+      void connectMetaMask()
+    }
+  }
+
+  const connectNamadaKeychain = async () => {
+    try {
+      const available = await isNamadaAvailable()
+      if (!available) {
+        showToast({ title: 'Namada Keychain', message: 'Please install the Namada Keychain extension', variant: 'error' })
+        return
+      }
+      await connectNamada()
+      const connected = await checkNamada()
+      if (connected) {
+        const acct = await getDefaultAccount()
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
+        if (acct?.address) {
+          dispatch({
+            type: 'SET_ADDRESSES',
+            payload: {
+              ...addressesRef.current,
+              namada: { ...addressesRef.current.namada, transparent: acct.address },
+            },
+          })
+        }
+        showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })
+      } else {
+        showToast({ title: 'Namada Keychain', message: 'Failed to connect', variant: 'error' })
+      }
+    } catch (e: any) {
+      showToast({ title: 'Namada Keychain', message: e?.message ?? 'Connection failed', variant: 'error' })
+    } finally {
+      setOpenConnect(false)
+    }
+  }
+
+  const disconnectNamadaKeychain = async () => {
+    try {
+      await disconnectNamada()
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'disconnected' } })
+      // keep addresses; user may prefer we do not clear namada address automatically
+      showToast({ title: 'Namada Keychain', message: 'Disconnected', variant: 'success' })
+    } catch {}
+  }
 
   return (
     <header className="sticky top-0 z-40 flex h-20 items-center bg-header-bg justify-between px-16 border-b-2 border-header-border">
@@ -93,7 +342,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
               onClick={() => setOpenConnect((v) => !v)}
               className="flex items-center gap-3 rounded-2xl px-6 py-2 text-md font-medium transition-colors bg-button-inactive text-button-text-inactive border border-button-text-inactive"
             >
-              <i className="fa-solid fa-plug text-lg" />
+              <i className={`text-lg ${state.walletConnections.metamask === 'connected' && state.walletConnections.namada === 'connected' ? 'fa-solid fa-plug-circle-check' : 'fa-solid fa-plug'}`} />
               <span>Connect</span>
               <span className="text-md">▾</span>
             </button>
@@ -101,13 +350,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
               <div className="absolute right-0 mt-2 w-56 rounded-xl border border-button-text-inactive bg-button-inactive text-button-text-inactive p-1 shadow-lg z-50">
                 <button
                   type="button"
-                  onClick={() => {
-                    dispatch({
-                      type: 'SET_WALLET_CONNECTION',
-                      payload: { metamask: state.walletConnections.metamask === 'connected' ? 'disconnected' : 'connected' },
-                    })
-                    setOpenConnect(false)
-                  }}
+                  onClick={handleToggleMetaMask}
                   className="flex w-full items-center justify-between gap-3 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
                 >
                   <span className="inline-flex items-center gap-2">
@@ -121,11 +364,11 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
                 <button
                   type="button"
                   onClick={() => {
-                    dispatch({
-                      type: 'SET_WALLET_CONNECTION',
-                      payload: { namada: state.walletConnections.namada === 'connected' ? 'disconnected' : 'connected' },
-                    })
-                    setOpenConnect(false)
+                    if (state.walletConnections.namada === 'connected') {
+                      void disconnectNamadaKeychain()
+                    } else {
+                      void connectNamadaKeychain()
+                    }
                   }}
                   className="flex w-full items-center justify-between gap-3 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
                 >
