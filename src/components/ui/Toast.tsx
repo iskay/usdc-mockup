@@ -8,6 +8,11 @@ export type Toast = {
   message: string
   variant?: ToastVariant
   durationMs?: number
+  action?: {
+    label: string
+    onClick: () => void
+    icon?: React.ReactNode
+  }
 }
 
 type ToastContextValue = {
@@ -81,6 +86,16 @@ export const Toaster: React.FC = () => {
               <div className="flex-1">
                 {t.title ? <div className="text-md text-left font-bold text-title">{t.title}</div> : null}
                 <div className="text-md text-left text-title leading-snug">{t.message}</div>
+                {t.action ? (
+                  <button
+                    type="button"
+                    onClick={t.action.onClick}
+                    className="mt-2 inline-flex items-center gap-1 text-sm text-accent-green hover:text-accent-green/80 underline"
+                  >
+                    {t.action.label}
+                    {t.action.icon}
+                  </button>
+                ) : null}
               </div>
               <button
                 type="button"

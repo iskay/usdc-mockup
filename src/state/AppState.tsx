@@ -12,7 +12,7 @@ export type ChainBalances = {
   sepolia: { usdc: string }
   // kept for backward compatibility in places still using "noble"
   noble?: { usdc: string }
-  namada: { usdcTransparent: string; usdcShielded: string }
+  namada: { usdcTransparent: string; usdcShielded: string; namTransparent: string; namShielded: string }
 }
 
 export type WalletConnections = {
@@ -51,8 +51,14 @@ export type AppState = {
   }
 }
 
+// Allows merging only the specific fields of a chain's balances
+type PartialChainBalances = {
+  [K in keyof ChainBalances]?: Partial<ChainBalances[K]>
+}
+
 type AppAction =
   | { type: 'SET_BALANCES'; payload: ChainBalances }
+  | { type: 'MERGE_BALANCES'; payload: PartialChainBalances }
   | { type: 'SET_WALLET_CONNECTIONS'; payload: WalletConnections }
   | { type: 'SET_WALLET_CONNECTION'; payload: Partial<WalletConnections> }
   | { type: 'SET_TX_STATUS'; payload: TxStatus }
@@ -68,7 +74,7 @@ const initialState: AppState = {
     arbitrum: { usdc: '--' },
     sepolia: { usdc: '--' },
     noble: { usdc: '--' },
-    namada: { usdcTransparent: '--', usdcShielded: '924.80' },
+    namada: { usdcTransparent: '--', usdcShielded: '--', namTransparent: '--', namShielded: '--' },
   },
   walletConnections: {
     metamask: 'disconnected',
@@ -84,7 +90,7 @@ const initialState: AppState = {
     sepolia: '',
     namada: {
       transparent: '',
-      shielded: 'znam1z8y7x6w5v4u3t2s1r0q9p8o7n6m5l4k3j2h1g',
+      shielded: '',
     },
   },
 }
@@ -93,6 +99,17 @@ function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'SET_BALANCES':
       return { ...state, balances: action.payload }
+    case 'MERGE_BALANCES': {
+      const partial = action.payload
+      const merged: ChainBalances = { ...state.balances } as ChainBalances
+      for (const key of Object.keys(partial) as (keyof ChainBalances)[]) {
+        // @ts-ignore dynamic merge per-chain
+        const existing = state.balances[key] || {}
+        // @ts-ignore shallow merge of per-chain object
+        merged[key] = { ...existing, ...partial[key] }
+      }
+      return { ...state, balances: merged }
+    }
     case 'SET_WALLET_CONNECTIONS':
       return { ...state, walletConnections: action.payload }
     case 'SET_WALLET_CONNECTION':

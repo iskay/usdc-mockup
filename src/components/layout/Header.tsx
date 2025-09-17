@@ -4,6 +4,9 @@ import { SidebarButton } from '../ui/SidebarButton'
 import { useToast } from '../ui/Toast'
 import { useNamadaKeychain } from '../../utils/namada'
 import { useAppState } from '../../state/AppState'
+import { useNamadaSdk } from '../../state/NamadaSdkProvider'
+import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewingKey } from '../../utils/shieldedSync'
+import { fetchBlockHeightByTimestamp } from '../../utils/indexer'
 
 type NavItem = { label: string; icon: string; key: string }
 
@@ -21,12 +24,31 @@ export type HeaderProps = {
 export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
+  const { sdk, rpc, isReady } = useNamadaSdk()
   const hasInProgressTx = state.transactions.some(tx => tx.status === 'submitting' || tx.status === 'pending')
   const [openConnect, setOpenConnect] = useState(false)
+  const [isShieldedSyncing, setIsShieldedSyncing] = useState(false)
+  const [shieldedSyncProgress, setShieldedSyncProgress] = useState<number | null>(null)
   const connectRef = useRef<HTMLDivElement | null>(null)
   const hasAutoReconnected = useRef(false)
   const addressesRef = useRef(state.addresses)
-  const { connect: connectNamada, disconnect: disconnectNamada, checkConnection: checkNamada, getDefaultAccount, isAvailable: isNamadaAvailable } = useNamadaKeychain()
+  const { connect: connectNamada, disconnect: disconnectNamada, checkConnection: checkNamada, getDefaultAccount, getAccounts: getNamadaAccounts, isAvailable: isNamadaAvailable } = useNamadaKeychain()
+
+  // Helper: given a transparent account address, find its paired shielded account via parentId
+  const resolveShieldedForTransparent = async (transparentAddr?: string): Promise<string | null> => {
+    try {
+      if (!transparentAddr) return null
+      const accounts = (await getNamadaAccounts()) as any[]
+      if (!Array.isArray(accounts)) return null
+      const parent = accounts.find((a) => a?.address === transparentAddr)
+      if (!parent?.id) return null
+      const child = accounts.find((a) => (a?.parentId === parent.id) && typeof a?.address === 'string' && String(a?.type || '').toLowerCase().includes('shielded'))
+      if (child?.address && child.address.startsWith('z')) return child.address as string
+      return null
+    } catch {
+      return null
+    }
+  }
 
   useEffect(() => {
     addressesRef.current = state.addresses
@@ -90,14 +112,15 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           const acct = await getDefaultAccount()
           dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
           if (acct?.address) {
+            const shielded = await resolveShieldedForTransparent(acct.address)
             dispatch({
               type: 'SET_ADDRESSES',
               payload: {
                 ...addressesRef.current,
-                namada: { ...addressesRef.current.namada, transparent: acct.address },
+                namada: { ...addressesRef.current.namada, transparent: acct.address, shielded: shielded || addressesRef.current.namada.shielded },
               },
             })
-            console.log('Namada account:', acct)
+            console.log('Namada account:', acct, 'Shielded paired:', shielded)
           }
           showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
         } else {
@@ -255,11 +278,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         const acct = await getDefaultAccount()
         dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
         if (acct?.address) {
+          const shielded = await resolveShieldedForTransparent(acct.address)
           dispatch({
             type: 'SET_ADDRESSES',
             payload: {
               ...addressesRef.current,
-              namada: { ...addressesRef.current.namada, transparent: acct.address },
+              namada: { ...addressesRef.current.namada, transparent: acct.address, shielded: shielded || addressesRef.current.namada.shielded },
             },
           })
         }
@@ -334,6 +358,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
                 />
               )
             })}
+
 
           {/* Connect dropdown */}
           <div className="relative" ref={connectRef}>

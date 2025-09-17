@@ -5,6 +5,13 @@ export interface NamadaKeychainAccount {
   alias?: string
   publicKey?: string
   chainId?: string
+  // Optional shielded fields exposed by the extension for ShieldedKeys accounts
+  type?: string
+  viewingKey?: string
+  pseudoExtendedKey?: string
+  source?: string
+  timestamp?: number
+  diversifierIndex?: number
 }
 
 export interface Namada {
