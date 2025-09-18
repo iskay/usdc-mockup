@@ -17,7 +17,8 @@ import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewi
 import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalance'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
-import { fetchBlockHeightByTimestamp } from '../../utils/indexer'
+import { buildSignBroadcastUnshieldThenIbc } from '../../utils/txUnshieldIbc'
+import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable } from '../../utils/indexer'
 import { type TxProps } from '@namada/sdk-multicore'
 
 const chains = [
@@ -135,14 +136,47 @@ export const BridgeForm: React.FC = () => {
       const decimals = getAssetDecimalsByDisplay(display, 6)
       const defaultAmountInBase = new BigNumber(1).multipliedBy(new BigNumber(10).pow(decimals))
       const amountInBase = opts?.amountInBase ?? defaultAmountInBase
-      const defaultGas: ShieldGasConfig = {
-        gasToken: (import.meta.env.VITE_NAMADA_NAM_TOKEN as string),
-        gasLimit: new BigNumber("34173"),
-        gasPriceInMinDenom: new BigNumber("0.000001"),
-      }
-      const gas: ShieldGasConfig = opts?.gas ?? defaultGas
-      const chain = { chainId, nativeTokenAddress: gas.gasToken }
+      // Determine public key presence (affects fee estimate via potential RevealPk)
       const publicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+
+      // Compute gas dynamically using indexer and use the shielding token as the gas token
+      const candidateGasToken = tokenAddress
+      let gas: ShieldGasConfig | undefined
+      try {
+        const txKinds: string[] = ['ShieldingTransfer']
+        if (!publicKey) txKinds.unshift('RevealPk')
+        const [estimate, priceTable] = await Promise.all([
+          fetchGasEstimateForKinds(txKinds),
+          fetchGasPriceTable().catch(() => []),
+        ])
+        const priceEntry = priceTable.find((p) => p.token === candidateGasToken)
+          || priceTable.find((p) => p.token === (import.meta.env.VITE_NAMADA_NAM_TOKEN as string))
+        const gasLimit = new BigNumber(estimate?.avg ?? 50000)
+        const gasPriceInMinDenom = new BigNumber(priceEntry?.gasPrice ?? '0.000001')
+        gas = {
+          gasToken: candidateGasToken,
+          gasLimit,
+          gasPriceInMinDenom,
+        }
+      } catch (e) {
+        console.warn('[Shield] Gas lookup failed, using fallback defaults', e)
+        gas = {
+          gasToken: candidateGasToken,
+          gasLimit: new BigNumber('50000'),
+          gasPriceInMinDenom: new BigNumber('0.000001'),
+        }
+      }
+
+      // Allow explicit override of gas only for limit/price, but enforce gas token = shielding token
+      if (opts?.gas) {
+        gas = {
+          gasToken: candidateGasToken,
+          gasLimit: opts.gas.gasLimit,
+          gasPriceInMinDenom: opts.gas.gasPriceInMinDenom,
+        }
+      }
+
+      const chain = { chainId, nativeTokenAddress: gas.gasToken }
       const label = display.toUpperCase()
       console.group(`[Shield ${label}]`)
       console.info('Inputs', { chainId, token: tokenAddress, transparent, shielded, amountInBase: amountInBase.toString(), gas: { token: gas.gasToken, gasLimit: gas.gasLimit.toString(), gasPrice: gas.gasPriceInMinDenom.toString() }, publicKeyPresent: !!publicKey })
@@ -1141,6 +1175,106 @@ export const BridgeForm: React.FC = () => {
                         type="button"
                         onClick={async () => {
                           try {
+                            if (state.walletConnections.namada !== 'connected') {
+                              showToast({ title: 'Namada', message: 'Connect Namada Keychain first', variant: 'error' })
+                              return
+                            }
+                            if (!isReady || !sdk) {
+                              showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
+                              return
+                            }
+                            const transparent = state.addresses.namada.transparent
+                            const shielded = state.addresses.namada.shielded || ''
+                            if (!transparent || !shielded) {
+                              showToast({ title: 'IBC Debug', message: 'Missing Namada addresses', variant: 'error' })
+                              return
+                            }
+                            const chainId = await fetchChainIdFromRpc((sdk as any).url)
+                            const namAddr = await getNAMAddressFromRegistry()
+                            const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+                            if (!namToken) {
+                              showToast({ title: 'IBC Debug', message: 'NAM token address not found', variant: 'error' })
+                              return
+                            }
+                            const amountInBase = new BigNumber(1)
+                            const gas = {
+                              gasToken: namToken,
+                              gasLimit: new BigNumber('75000'),
+                              gasPriceInMinDenom: new BigNumber('0.000001'),
+                            }
+                            const chain = { chainId, nativeTokenAddress: namToken }
+                            const receiver = 'noble1nfctx22mxedsrsf30a4pnkldw4hhfc4gd9uq5w'
+                            const channelId = 'channel-27'
+                            const accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+
+                            showToast({ title: 'IBC Debug', message: 'Building unshield + IBC...', variant: 'info' })
+                            const result = await buildSignBroadcastUnshieldThenIbc(
+                              {
+                                sdk: sdk as any,
+                                accountPublicKey,
+                                fromShielded: shielded,
+                                toTransparent: transparent,
+                                tokenAddress: namToken,
+                                amountInBase,
+                                gas,
+                                chain,
+                              },
+                              {
+                                sdk: sdk as any,
+                                accountPublicKey,
+                                fromTransparent: transparent,
+                                receiver,
+                                tokenAddress: namToken,
+                                amountInBase,
+                                gas,
+                                chain,
+                                channelId,
+                              },
+                              (phase) => {
+                                const map: Record<string, string> = {
+                                  'building:unshield': 'Building unshielding tx',
+                                  'signing:unshield': 'Approve unshielding in Keychain',
+                                  'submitting:unshield': 'Submitting unshielding...',
+                                  'building:ibc': 'Building IBC transfer',
+                                  'signing:ibc': 'Approve IBC in Keychain',
+                                  'submitting:ibc': 'Submitting IBC transfer...'
+                                }
+                                const msg = map[phase]
+                                if (msg) showToast({ title: 'IBC Debug', message: msg, variant: 'info' })
+                              }
+                            )
+                            const ibcHash = (result.ibc.response as any)?.hash
+                            const hashDisplay = ibcHash ? `${ibcHash.slice(0, 8)}...${ibcHash.slice(-8)}` : 'OK'
+                            const explorerUrl = chainId.startsWith('housefire')
+                              ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
+                              : `https://namada.world/transactions/${ibcHash?.toLowerCase()}`
+                            showToast({
+                              title: 'IBC Debug',
+                              message: `Submitted: ${hashDisplay}`,
+                              variant: 'success',
+                              ...(ibcHash && {
+                                action: {
+                                  label: 'View on explorer',
+                                  onClick: () => window.open(explorerUrl, '_blank'),
+                                  icon: <i className="fas fa-external-link-alt text-xs" />,
+                                }
+                              })
+                            })
+                            setShowMoreDropdown(false)
+                          } catch (e: any) {
+                            console.error('[IBC Debug] Error', e)
+                            showToast({ title: 'IBC Debug', message: e?.message ?? 'Failed', variant: 'error' })
+                          }
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
+                      >
+                        <i className="fa-solid fa-paper-plane text-sm"></i>
+                        <span>Debug IBC Outgoing</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
                             if (!isReady || !sdk) {
                               showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
                               return
@@ -1233,12 +1367,7 @@ export const BridgeForm: React.FC = () => {
                       return
                     }
                     const amountInBase = new BigNumber(1)
-                    const gas: ShieldGasConfig = {
-                      gasToken: (import.meta.env.VITE_NAMADA_NAM_TOKEN as string) || tokenAddr,
-                      gasLimit: new BigNumber("34173"),
-                      gasPriceInMinDenom: new BigNumber("0.000001"),
-                    }
-                    await shieldNowForToken(tokenAddr, 'NAM', { amountInBase, gas })
+                    await shieldNowForToken(tokenAddr, 'NAM', { amountInBase })
                   } catch (e: any) {
                     console.error('[Shield NAM] Error', e)
                     showToast({ title: 'Shield', message: e?.message ?? 'Failed', variant: 'error' })

@@ -1,5 +1,5 @@
 import { initSdk } from '@namada/sdk-multicore/inline'
-import { type WrapperTxMsgValue, type ShieldingTransferMsgValue, type ShieldedTransferDataMsgValue, type TxMsgValue, type TxProps } from '@namada/sdk-multicore'
+import { type WrapperTxMsgValue, type ShieldingTransferMsgValue, type ShieldedTransferDataMsgValue, type UnshieldingTransferProps, type IbcTransferProps, type TxMsgValue, type TxProps } from '@namada/sdk-multicore'
 import BigNumber from 'bignumber.js'
 
 // Types matching Namadillo's approach
@@ -44,7 +44,34 @@ type BuildShieldingMsg = { type: 'build-shielding', payload: {
   memo?: string
 } }
 
-type InMsg = InitMsg | BuildShieldingMsg
+type BuildUnshieldingMsg = { type: 'build-unshielding', payload: {
+  account: Account
+  gasConfig: GasConfig
+  chain: ChainSettings
+  fromShielded: string
+  toTransparent: string
+  tokenAddress: string
+  amountInBase: string
+  memo?: string
+} }
+
+type BuildIbcTransferMsg = { type: 'build-ibc-transfer', payload: {
+  account: Account
+  gasConfig: GasConfig
+  chain: ChainSettings
+  fromTransparent: string
+  receiver: string
+  tokenAddress: string
+  amountInBase: string
+  portId?: string
+  channelId: string
+  timeoutHeight?: string
+  timeoutSecOffset?: string
+  memo?: string
+  refundTarget?: string
+} }
+
+type InMsg = InitMsg | BuildShieldingMsg | BuildUnshieldingMsg | BuildIbcTransferMsg
 
 let sdk: any | undefined
 
@@ -167,6 +194,72 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
       )
 
       postMessage({ type: 'build-shielding-done', payload: encodedTxData })
+      return
+    }
+    if (msg.type === 'build-unshielding') {
+      if (!sdk) throw new Error('SDK not initialized')
+      const { account, gasConfig, chain, fromShielded, toTransparent, tokenAddress, amountInBase, memo } = msg.payload
+
+      try {
+        await sdk.masp.loadMaspParams('', chain.chainId)
+      } catch {}
+
+      const props: UnshieldingTransferProps = {
+        source: fromShielded,
+        data: [
+          {
+            target: toTransparent,
+            token: tokenAddress,
+            amount: new BigNumber(amountInBase),
+          },
+        ],
+      }
+
+      const encodedTxData = await buildTx<UnshieldingTransferProps>(
+        account,
+        gasConfig,
+        chain,
+        [props],
+        sdk.tx.buildUnshieldingTransfer,
+        memo,
+        false // shouldRevealPk for unshielding
+      )
+
+      postMessage({ type: 'build-unshielding-done', payload: encodedTxData })
+      return
+    }
+    if (msg.type === 'build-ibc-transfer') {
+      if (!sdk) throw new Error('SDK not initialized')
+      const { account, gasConfig, chain, fromTransparent, receiver, tokenAddress, amountInBase, portId, channelId, timeoutHeight, timeoutSecOffset, memo, refundTarget } = msg.payload
+
+      try {
+        await sdk.masp.loadMaspParams('', chain.chainId)
+      } catch {}
+
+      const props: IbcTransferProps = {
+        source: fromTransparent,
+        receiver,
+        token: tokenAddress,
+        amountInBaseDenom: new BigNumber(amountInBase),
+        portId: portId || 'transfer',
+        channelId,
+        memo,
+        refundTarget,
+        timeoutHeight: timeoutHeight ? BigInt(timeoutHeight) : undefined,
+        timeoutSecOffset: timeoutSecOffset ? BigInt(timeoutSecOffset) : undefined,
+      }
+
+      const encodedTxData = await buildTx<IbcTransferProps>(
+        account,
+        gasConfig,
+        chain,
+        [props],
+        sdk.tx.buildIbcTransfer,
+        memo,
+        true // shouldRevealPk if PK not revealed
+      )
+
+      postMessage({ type: 'build-ibc-transfer-done', payload: encodedTxData })
       return
     }
   } catch (e: any) {
