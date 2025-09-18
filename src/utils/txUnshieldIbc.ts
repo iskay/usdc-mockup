@@ -41,7 +41,8 @@ export type UnshieldParams = {
 export type IbcParams = {
   sdk: Sdk
   accountPublicKey: string
-  fromTransparent: string
+  ownerAddress: string
+  source: string
   receiver: string
   tokenAddress: string
   amountInBase: BigNumber
@@ -53,6 +54,8 @@ export type IbcParams = {
   timeoutSecOffset?: bigint
   memo?: string
   refundTarget?: string
+  gasSpendingKey?: string
+  // maspFeePaymentProps not used for IBC - gasSpendingKey handles fees directly from MASP
 }
 
 export type Phase =
@@ -140,7 +143,7 @@ export async function buildIbcBatch(params: IbcParams): Promise<EncodedTxData<Ib
     worker.addEventListener('message', onMsg as EventListener)
     worker.postMessage({ type: 'build-ibc-transfer', payload: {
       account: {
-        address: params.fromTransparent,
+        address: params.ownerAddress,
         publicKey: params.accountPublicKey,
       },
       gasConfig: {
@@ -149,7 +152,7 @@ export async function buildIbcBatch(params: IbcParams): Promise<EncodedTxData<Ib
         gasPriceInMinDenom: params.gas.gasPriceInMinDenom.toString(),
       },
       chain: params.chain,
-      fromTransparent: params.fromTransparent,
+      source: params.source,
       receiver: params.receiver,
       tokenAddress: params.tokenAddress,
       amountInBase: params.amountInBase.toString(),
@@ -159,6 +162,8 @@ export async function buildIbcBatch(params: IbcParams): Promise<EncodedTxData<Ib
       timeoutSecOffset: params.timeoutSecOffset?.toString(),
       memo: params.memo,
       refundTarget: params.refundTarget,
+      gasSpendingKey: params.gasSpendingKey,
+      // maspFeePaymentProps not used for IBC - gasSpendingKey handles fees directly
     } })
   })
   worker.terminate()
@@ -202,17 +207,15 @@ export async function signBatchTxs(
   throw new Error('Signing is not supported by the Namada Keychain in this context')
 }
 
-export async function buildSignBroadcastUnshieldThenIbc(
-  unshield: UnshieldParams,
-  ibc: IbcParams,
+export async function buildSignBroadcastUnshieldingIbc(
+  ibc: IbcParams, // Simplified to only IBC
   onPhase?: (phase: Phase) => void,
-): Promise<{ unshield: { txs: TxMsgValue[]; signed: Uint8Array[]; response: any }, ibc: { txs: TxMsgValue[]; signed: Uint8Array[]; response: any } }>{
-  console.log("unshield params", unshield)
+): Promise<{ ibc: { txs: TxMsgValue[]; signed: Uint8Array[]; response: any } }>{
   console.log("ibc params", ibc)
   // Ensure extension is connected to the correct Namada chain before signing
   try {
     const namada: any = (window as any).namada
-    const desiredChainId = unshield?.chain?.chainId
+    const desiredChainId = ibc.chain?.chainId
     if (namada && typeof namada.isConnected === 'function' && typeof namada.connect === 'function' && desiredChainId) {
       const connected = await namada.isConnected(desiredChainId)
       if (!connected) {
@@ -222,31 +225,27 @@ export async function buildSignBroadcastUnshieldThenIbc(
   } catch (e) {
     console.warn('[Debug] Unable to pre-connect Namada extension to chain', e)
   }
-  // Unshielding
-  // try { onPhase?.('building:unshield') } catch {}
-  // const unshieldTxData = await buildUnshieldBatch(unshield)
-  // const checksumsUnshield = await queryChecksums(unshield.sdk)
-  // try { onPhase?.('signing:unshield') } catch {}
-  // const unshieldSigned = await signBatchTxs(unshield.sdk, unshieldTxData.txs, unshield.toTransparent, checksumsUnshield)
-  // if (!unshieldSigned?.length) throw new Error('Unshield signing returned no bytes')
-  // try { onPhase?.('submitting:unshield') } catch {}
-  // const unshieldResp = await (unshield.sdk as any).rpc.broadcastTx(unshieldSigned[0])
-  // try { onPhase?.('submitted:unshield') } catch {}
 
   // IBC transfer
   try { onPhase?.('building:ibc') } catch {}
   const ibcTxData = await buildIbcBatch(ibc)
   const checksumsIbc = await queryChecksums(ibc.sdk)
   try { onPhase?.('signing:ibc') } catch {}
-  const ibcSigned = await signBatchTxs(ibc.sdk, ibcTxData.txs, ibc.fromTransparent, checksumsIbc)
+  // Ensure the disposable wrapper signer is persisted so the extension can pay fees from it
+  try {
+    const namada: any = (window as any).namada
+    const signer = await namada?.getSigner?.()
+    if (signer && typeof signer.persistDisposableKeypair === 'function') {
+      await signer.persistDisposableKeypair(ibc.ownerAddress)
+    }
+  } catch {}
+  const ibcSigned = await signBatchTxs(ibc.sdk, ibcTxData.txs, ibc.ownerAddress, checksumsIbc)
   if (!ibcSigned?.length) throw new Error('IBC signing returned no bytes')
   try { onPhase?.('submitting:ibc') } catch {}
   const ibcResp = await (ibc.sdk as any).rpc.broadcastTx(ibcSigned[0])
   try { onPhase?.('submitted:ibc') } catch {}
 
   return {
-    // unshield: { txs: unshieldTxData.txs, signed: unshieldSigned, response: unshieldResp },
-    unshield: { txs: [], signed: [], response: null },
     ibc: { txs: ibcTxData.txs, signed: ibcSigned, response: ibcResp },
   }
 }

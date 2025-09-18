@@ -17,7 +17,7 @@ import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewi
 import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalance'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
-import { buildSignBroadcastUnshieldThenIbc } from '../../utils/txUnshieldIbc'
+import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
 import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable } from '../../utils/indexer'
 import { type TxProps } from '@namada/sdk-multicore'
 
@@ -1205,30 +1205,57 @@ export const BridgeForm: React.FC = () => {
                             const chain = { chainId, nativeTokenAddress: namToken }
                             const receiver = 'noble1nfctx22mxedsrsf30a4pnkldw4hhfc4gd9uq5w'
                             const channelId = 'channel-27'
-                            const accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+                            // Generate disposable wrapper signer (ephemeral payer)
+                            let accountPublicKey = ''
+                            let ownerAddressForWrapper = transparent
+                            try {
+                              const namada: any = (window as any).namada
+                              const signer = await namada?.getSigner?.()
+                              const disposableWrapper = await signer?.genDisposableKeypair?.()
+                              if (disposableWrapper?.publicKey && disposableWrapper?.address) {
+                                accountPublicKey = disposableWrapper.publicKey
+                                ownerAddressForWrapper = disposableWrapper.address
+                              } else {
+                                accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+                              }
+                            } catch {
+                              accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+                            }
 
-                            showToast({ title: 'IBC Debug', message: 'Building unshield + IBC...', variant: 'info' })
-                            const result = await buildSignBroadcastUnshieldThenIbc(
+                            // Use shielded source directly with MASP gas spending key to avoid unshield-to-known-address
+                            const allAccounts = (await getNamadaAccounts()) as any[]
+                            const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
+                            const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
+                            if (!pseudoExtendedKey) {
+                              showToast({ title: 'IBC Debug', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' })
+                              return
+                            }
+
+                            // Generate disposable refund target similar to Namadillo
+                            let refundTarget: string | undefined
+                            try {
+                              const namada: any = (window as any).namada
+                              const signer = await namada?.getSigner?.()
+                              const disposable = await signer?.genDisposableKeypair?.()
+                              refundTarget = disposable?.address
+                            } catch {}
+
+                            // We rely on gasSpendingKey for IBC to pay fees from MASP; do not pre-fund wrapper via MASP fee payment here (matches Namadillo)
+
+                            const result = await buildSignBroadcastUnshieldingIbc(
                               {
                                 sdk: sdk as any,
                                 accountPublicKey,
-                                fromShielded: shielded,
-                                toTransparent: transparent,
-                                tokenAddress: namToken,
-                                amountInBase,
-                                gas,
-                                chain,
-                              },
-                              {
-                                sdk: sdk as any,
-                                accountPublicKey,
-                                fromTransparent: transparent,
+                                ownerAddress: ownerAddressForWrapper,
+                                source: pseudoExtendedKey,
                                 receiver,
                                 tokenAddress: namToken,
                                 amountInBase,
                                 gas,
                                 chain,
                                 channelId,
+                                gasSpendingKey: pseudoExtendedKey,
+                                refundTarget,
                               },
                               (phase) => {
                                 const map: Record<string, string> = {

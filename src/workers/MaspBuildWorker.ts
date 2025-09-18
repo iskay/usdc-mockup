@@ -59,7 +59,7 @@ type BuildIbcTransferMsg = { type: 'build-ibc-transfer', payload: {
   account: Account
   gasConfig: GasConfig
   chain: ChainSettings
-  fromTransparent: string
+  source: string
   receiver: string
   tokenAddress: string
   amountInBase: string
@@ -69,6 +69,7 @@ type BuildIbcTransferMsg = { type: 'build-ibc-transfer', payload: {
   timeoutSecOffset?: string
   memo?: string
   refundTarget?: string
+  gasSpendingKey?: string
 } }
 
 type InMsg = InitMsg | BuildShieldingMsg | BuildUnshieldingMsg | BuildIbcTransferMsg
@@ -110,7 +111,8 @@ const buildTx = async <T>(
   queryProps: T[],
   txFn: (wrapperTxProps: WrapperTxMsgValue, props: T) => Promise<TxProps>,
   memo?: string,
-  shouldRevealPk: boolean = true
+  shouldRevealPk: boolean = true,
+  maspFeePaymentProps?: (UnshieldingTransferProps & { memo: string })
 ): Promise<EncodedTxData<T>> => {
   const txs: TxProps[] = []
   const txProps: TxProps[] = []
@@ -124,6 +126,16 @@ const buildTx = async <T>(
       const revealPkTx = await sdk.tx.buildRevealPk(wrapperTxProps)
       txs.push(revealPkTx)
     }
+  }
+
+  // Optional MASP fee payment pre-step: fund wrapper fee payer from MASP
+  if (maspFeePaymentProps) {
+    const feeWrapperProps = getTxProps(account, gasConfig, chain, maspFeePaymentProps.memo)
+    const maspFeePaymentTx = await sdk.tx.buildUnshieldingTransfer(
+      feeWrapperProps,
+      maspFeePaymentProps,
+    )
+    txs.push(maspFeePaymentTx)
   }
 
   for (const props of queryProps) {
@@ -230,14 +242,14 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
     }
     if (msg.type === 'build-ibc-transfer') {
       if (!sdk) throw new Error('SDK not initialized')
-      const { account, gasConfig, chain, fromTransparent, receiver, tokenAddress, amountInBase, portId, channelId, timeoutHeight, timeoutSecOffset, memo, refundTarget } = msg.payload
+      const { account, gasConfig, chain, source, receiver, tokenAddress, amountInBase, portId, channelId, timeoutHeight, timeoutSecOffset, memo, refundTarget, gasSpendingKey } = msg.payload
 
       try {
         await sdk.masp.loadMaspParams('', chain.chainId)
       } catch {}
 
       const props: IbcTransferProps = {
-        source: fromTransparent,
+        source,
         receiver,
         token: tokenAddress,
         amountInBaseDenom: new BigNumber(amountInBase),
@@ -245,10 +257,13 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
         channelId,
         memo,
         refundTarget,
+        gasSpendingKey,
         timeoutHeight: timeoutHeight ? BigInt(timeoutHeight) : undefined,
         timeoutSecOffset: timeoutSecOffset ? BigInt(timeoutSecOffset) : undefined,
       }
 
+      // For IBC transfers, we don't use maspFeePaymentProps - the gasSpendingKey handles fees directly from MASP
+      const shouldRevealPk = !Boolean(props.gasSpendingKey) // Only reveal PK if no gasSpendingKey
       const encodedTxData = await buildTx<IbcTransferProps>(
         account,
         gasConfig,
@@ -256,7 +271,8 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
         [props],
         sdk.tx.buildIbcTransfer,
         memo,
-        true // shouldRevealPk if PK not revealed
+        shouldRevealPk
+        // No maspFeePaymentProps for IBC - gasSpendingKey handles fees directly
       )
 
       postMessage({ type: 'build-ibc-transfer-done', payload: encodedTxData })
