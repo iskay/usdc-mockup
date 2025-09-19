@@ -69,12 +69,34 @@ export async function fetchGasEstimateForKinds(txKinds: string[]): Promise<GasEs
 }
 
 export async function fetchGasPriceTable(): Promise<GasPriceEntry[]> {
-  const url = `${getIndexerUrl()}/api/v1/gas/price`
+  const url = `${getIndexerUrl()}/api/v1/gas-price`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Indexer HTTP ${res.status}`)
   const data = await res.json()
   if (!Array.isArray(data)) return []
   return data.map((entry: any) => ({ token: String(entry.token), gasPrice: entry.gasPrice }))
+}
+
+
+// Check whether a specific token address is a valid gas token in the indexer.
+// Endpoint returns an array; if empty -> not a valid gas token.
+// Example response: [{ token: { address: "tnam..." }, minDenomAmount: "1" }]
+export async function fetchGasPriceForTokenAddress(tokenAddress: string): Promise<{ isValid: boolean; minDenomAmount?: string }>{
+  const url = `${getIndexerUrl()}/api/v1/gas-price/${tokenAddress}`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Indexer HTTP ${res.status}`)
+    const data = await res.json()
+    if (Array.isArray(data) && data.length > 0) {
+      const first = data[0] || {}
+      const minDenomAmount = String(first?.minDenomAmount ?? '')
+      return { isValid: true, minDenomAmount: minDenomAmount || undefined }
+    }
+    return { isValid: false }
+  } catch (e) {
+    // Treat failures as not valid to allow fallback to NAM
+    return { isValid: false }
+  }
 }
 
 

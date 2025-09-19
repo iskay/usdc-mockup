@@ -228,6 +228,22 @@ export async function buildSignBroadcastUnshieldingIbc(
 
   // IBC transfer
   try { onPhase?.('building:ibc') } catch {}
+  console.info('[IBC] Build params', {
+    ownerAddress: ibc.ownerAddress,
+    accountPublicKey: ibc.accountPublicKey?.slice(0, 16) + '...',
+    sourceLen: ibc.source?.length,
+    receiver: ibc.receiver,
+    tokenAddress: ibc.tokenAddress,
+    amountInBase: ibc.amountInBase.toString(),
+    gas: { token: ibc.gas.gasToken, gasLimit: ibc.gas.gasLimit.toString(), gasPrice: ibc.gas.gasPriceInMinDenom.toString() },
+    chain: ibc.chain,
+    channelId: ibc.channelId,
+    portId: ibc.portId,
+    hasMemo: Boolean(ibc.memo),
+    memoLen: ibc.memo?.length,
+    refundTarget: ibc.refundTarget,
+    hasGasSpendingKey: Boolean(ibc.gasSpendingKey),
+  })
   const ibcTxData = await buildIbcBatch(ibc)
   const checksumsIbc = await queryChecksums(ibc.sdk)
   try { onPhase?.('signing:ibc') } catch {}

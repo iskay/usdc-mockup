@@ -262,6 +262,26 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
         timeoutSecOffset: timeoutSecOffset ? BigInt(timeoutSecOffset) : undefined,
       }
 
+      // Debug: log sanitized inputs for IBC build
+      try {
+        console.info('[MaspBuildWorker] build-ibc-transfer inputs', {
+          account: { address: account?.address?.slice(0, 12) + '...' },
+          gasConfig: { token: gasConfig?.gasToken, gasLimit: gasConfig?.gasLimit, gasPrice: gasConfig?.gasPriceInMinDenom },
+          chain,
+          props: {
+            source: typeof source === 'string' ? `${source.slice(0, 12)}...` : 'N/A',
+            receiver,
+            token: tokenAddress,
+            amountInBaseDenom: String(amountInBase),
+            portId: props.portId,
+            channelId: props.channelId,
+            memoLen: memo ? memo.length : 0,
+            refundTarget: refundTarget ? refundTarget.slice(0, 12) + '...' : undefined,
+            hasGasSpendingKey: Boolean(gasSpendingKey),
+          },
+        })
+      } catch {}
+
       // For IBC transfers, we don't use maspFeePaymentProps - the gasSpendingKey handles fees directly from MASP
       const shouldRevealPk = !Boolean(props.gasSpendingKey) // Only reveal PK if no gasSpendingKey
       const encodedTxData = await buildTx<IbcTransferProps>(

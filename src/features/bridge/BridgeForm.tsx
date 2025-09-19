@@ -18,7 +18,8 @@ import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalan
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
 import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
-import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable } from '../../utils/indexer'
+import { buildOrbiterCctpMemo } from '../../utils/ibcMemo'
+import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable, fetchGasPriceForTokenAddress } from '../../utils/indexer'
 import { type TxProps } from '@namada/sdk-multicore'
 
 const chains = [
@@ -46,10 +47,54 @@ export const BridgeForm: React.FC = () => {
   const [isAutoShieldedSyncing, setIsAutoShieldedSyncing] = useState(false)
   const [isShielding, setIsShielding] = useState(false)
   const [showMoreDropdown, setShowMoreDropdown] = useState(false)
+  const [balanceRefreshCountdown, setBalanceRefreshCountdown] = useState<number | null>(null)
   const shieldedSyncInProgressRef = useRef(false)
   const moreDropdownRef = useRef<HTMLDivElement | null>(null)
   const { sdk, rpc, isReady } = useNamadaSdk()
   const { getDefaultAccount, getAccounts: getNamadaAccounts, isAvailable: isNamadaAvailable } = useNamadaKeychain()
+
+  // Reusable gas estimation function
+  const estimateGasForToken = async (
+    candidateToken: string,
+    txKinds: string[],
+    fallbackGasLimit: string = '50000'
+  ): Promise<ShieldGasConfig> => {
+    // Validate candidate token and fallback to NAM if invalid
+    let selectedGasToken = candidateToken
+    try {
+      const validity = await fetchGasPriceForTokenAddress(candidateToken)
+      if (!validity?.isValid) {
+        const namAddr = await getNAMAddressFromRegistry()
+        selectedGasToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+      }
+    } catch {
+      const namAddr = await getNAMAddressFromRegistry()
+      selectedGasToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+    }
+
+    // Fetch gas estimate and price
+    try {
+      const [estimate, priceTable] = await Promise.all([
+        fetchGasEstimateForKinds(txKinds),
+        fetchGasPriceTable().catch(() => []),
+      ])
+      const priceEntry = priceTable.find((p) => p.token === selectedGasToken)
+      const gasLimit = new BigNumber(estimate?.avg ?? fallbackGasLimit)
+      const gasPriceInMinDenom = new BigNumber(priceEntry?.gasPrice ?? '0.000001')
+      return {
+        gasToken: selectedGasToken,
+        gasLimit,
+        gasPriceInMinDenom,
+      }
+    } catch (e) {
+      console.warn('[Gas Estimation] Failed, using fallback defaults', e)
+      return {
+        gasToken: selectedGasToken,
+        gasLimit: new BigNumber(fallbackGasLimit),
+        gasPriceInMinDenom: new BigNumber('0.000001'),
+      }
+    }
+  }
 
   // Handle clicking outside the more dropdown to close it
   useEffect(() => {
@@ -139,38 +184,15 @@ export const BridgeForm: React.FC = () => {
       // Determine public key presence (affects fee estimate via potential RevealPk)
       const publicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
 
-      // Compute gas dynamically using indexer and use the shielding token as the gas token
-      const candidateGasToken = tokenAddress
-      let gas: ShieldGasConfig | undefined
-      try {
-        const txKinds: string[] = ['ShieldingTransfer']
-        if (!publicKey) txKinds.unshift('RevealPk')
-        const [estimate, priceTable] = await Promise.all([
-          fetchGasEstimateForKinds(txKinds),
-          fetchGasPriceTable().catch(() => []),
-        ])
-        const priceEntry = priceTable.find((p) => p.token === candidateGasToken)
-          || priceTable.find((p) => p.token === (import.meta.env.VITE_NAMADA_NAM_TOKEN as string))
-        const gasLimit = new BigNumber(estimate?.avg ?? 50000)
-        const gasPriceInMinDenom = new BigNumber(priceEntry?.gasPrice ?? '0.000001')
-        gas = {
-          gasToken: candidateGasToken,
-          gasLimit,
-          gasPriceInMinDenom,
-        }
-      } catch (e) {
-        console.warn('[Shield] Gas lookup failed, using fallback defaults', e)
-        gas = {
-          gasToken: candidateGasToken,
-          gasLimit: new BigNumber('50000'),
-          gasPriceInMinDenom: new BigNumber('0.000001'),
-        }
-      }
+      // Compute gas dynamically using indexer
+      const txKinds: string[] = ['ShieldingTransfer']
+      if (!publicKey) txKinds.unshift('RevealPk')
+      let gas = await estimateGasForToken(tokenAddress, txKinds)
 
-      // Allow explicit override of gas only for limit/price, but enforce gas token = shielding token
+      // Allow explicit override of gas only for limit/price, but enforce selected gas token
       if (opts?.gas) {
         gas = {
-          gasToken: candidateGasToken,
+          gasToken: gas.gasToken,
           gasLimit: opts.gas.gasLimit,
           gasPriceInMinDenom: opts.gas.gasPriceInMinDenom,
         }
@@ -224,9 +246,22 @@ export const BridgeForm: React.FC = () => {
         })
       })
       
-      // Delay then refresh
+      // Delay then refresh with countdown
+      setBalanceRefreshCountdown(10)
+      const countdownInterval = setInterval(() => {
+        setBalanceRefreshCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval)
+            return null
+          }
+          return prev - 1
+        })
+      }, 1000)
+      
       setTimeout(async () => {
         await refreshShieldedAfterTx(chainId)
+        clearInterval(countdownInterval)
+        setBalanceRefreshCountdown(null)
       }, 10000)
       
       console.groupEnd()
@@ -334,6 +369,161 @@ export const BridgeForm: React.FC = () => {
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success' } } })
       showToast({ title: 'Send', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0, 6) + '…' + toNow.slice(-4) : chains.find(c => c.value === chain)?.label}`, variant: 'success' })
     }, 30000)
+  }
+
+  const sendNowViaOrbiter = async () => {
+    try {
+      if (state.walletConnections.namada !== 'connected') {
+        showToast({ title: 'Namada', message: 'Connect Namada Keychain first', variant: 'error' })
+        return
+      }
+      if (!isReady || !sdk) {
+        showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
+        return
+      }
+      const transparent = state.addresses.namada.transparent
+      const shielded = state.addresses.namada.shielded || ''
+      if (!transparent || !shielded) {
+        showToast({ title: 'Send', message: 'Missing Namada addresses', variant: 'error' })
+        return
+      }
+      console.group('[Send Orbiter] Inputs')
+      console.info('Form', { amount: sendAmount, address: sendAddress, chain })
+      const validation = validateForm(sendAmount, state.balances.namada.usdcShielded, sendAddress)
+      if (!validation.isValid) {
+        showToast({ title: 'Send', message: 'Please fix errors in the form', variant: 'error' })
+        console.groupEnd()
+        return
+      }
+
+      const chainId = await fetchChainIdFromRpc((sdk as any).url)
+      const usdcToken = await getUSDCAddressFromRegistry()
+      if (!usdcToken) {
+        showToast({ title: 'Send', message: 'USDC token address not found', variant: 'error' })
+        return
+      }
+
+      // Amount: convert display (6 decimals) to min-denom integer
+      const amountInBase = new BigNumber(sendAmount).multipliedBy(1e6)
+      if (!amountInBase.isFinite() || amountInBase.isLessThanOrEqualTo(0)) {
+        showToast({ title: 'Send', message: 'Invalid amount', variant: 'error' })
+        console.groupEnd()
+        return
+      }
+
+      const channelId = (import.meta as any)?.env?.VITE_CHANNEL_ID_ON_NAMADA as string || 'channel-27'
+      const receiver = 'noble15xt7kx5mles58vkkfxvf0lq78sw04jajvfgd4d'
+      const memo = buildOrbiterCctpMemo({
+        destinationDomain: 0,
+        evmRecipientHex20: sendAddress,
+      })
+
+      const namAddr = await getNAMAddressFromRegistry()
+      const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+      const txKinds: string[] = ['IbcTransfer']
+      const gas = await estimateGasForToken(namToken, txKinds, '90000')
+      const chainSett = { chainId, nativeTokenAddress: gas.gasToken }
+      console.info('Resolved', { chainId, usdcToken, amountInBase: amountInBase.toString(), channelId, receiver, gas: { token: gas.gasToken, gasLimit: gas.gasLimit.toString(), gasPrice: gas.gasPriceInMinDenom.toString() } })
+
+      // Ensure extension is connected before generating disposable keys
+      try {
+        const namada: any = (window as any).namada
+        if (namada && typeof namada.connect === 'function') {
+          const connected = await namada?.isConnected?.(chainId)
+          if (!connected) await namada.connect(chainId)
+        }
+      } catch {}
+
+      // Wrapper signer
+      let accountPublicKey = ''
+      let ownerAddressForWrapper = transparent
+      try {
+        const namada: any = (window as any).namada
+        const signer = await namada?.getSigner?.()
+        const disposableWrapper = await signer?.genDisposableKeypair?.()
+        if (disposableWrapper?.publicKey && disposableWrapper?.address) {
+          accountPublicKey = disposableWrapper.publicKey
+          ownerAddressForWrapper = disposableWrapper.address
+        } else {
+          accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+        }
+      } catch {
+        accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+      }
+
+      // Shielded pseudo key for paying gas
+      const allAccounts = (await getNamadaAccounts()) as any[]
+      const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
+      const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
+      if (!pseudoExtendedKey) {
+        showToast({ title: 'Send', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' })
+        console.groupEnd()
+        return
+      }
+
+      setSendTx({ status: 'submitting' })
+
+      // Optional refund target
+      let refundTarget: string | undefined
+      try {
+        const namada: any = (window as any).namada
+        const signer = await namada?.getSigner?.()
+        const disposable = await signer?.genDisposableKeypair?.()
+        refundTarget = disposable?.address
+      } catch {}
+
+      const result = await buildSignBroadcastUnshieldingIbc(
+        {
+          sdk: sdk as any,
+          accountPublicKey,
+          ownerAddress: ownerAddressForWrapper,
+          source: pseudoExtendedKey,
+          receiver,
+          tokenAddress: usdcToken,
+          amountInBase,
+          gas,
+          chain: chainSett,
+          channelId,
+          gasSpendingKey: pseudoExtendedKey,
+          memo,
+          refundTarget,
+        },
+        (phase) => {
+          const map: Record<string, string> = {
+            'building:ibc': 'Building IBC transfer',
+            'signing:ibc': 'Approve IBC in Keychain',
+            'submitting:ibc': 'Submitting IBC transfer...'
+          }
+          const msg = map[phase]
+          if (msg) showToast({ title: 'Send', message: msg, variant: 'info' })
+        }
+      )
+
+      const ibcHash = (result.ibc.response as any)?.hash
+      setSendTx({ status: 'success', hash: ibcHash })
+      const hashDisplay = ibcHash ? `${ibcHash.slice(0, 8)}...${ibcHash.slice(-8)}` : 'OK'
+      const explorerUrl = chainId.startsWith('housefire')
+        ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
+        : `https://namada.world/transactions/${ibcHash?.toLowerCase()}`
+      showToast({
+        title: 'Send',
+        message: `Submitted: ${hashDisplay} (${sendAmount} USDC)`,
+        variant: 'success',
+        ...(ibcHash && {
+          action: {
+            label: 'View on explorer',
+            onClick: () => window.open(explorerUrl, '_blank'),
+            icon: <i className="fas fa-external-link-alt text-xs" />,
+          }
+        })
+      })
+      console.groupEnd()
+    } catch (e: any) {
+      console.error('[Send Orbiter] Error', e)
+      showToast({ title: 'Send', message: e?.message ?? 'Failed', variant: 'error' })
+      setSendTx({ status: 'idle' })
+      try { console.groupEnd() } catch {}
+    }
   }
 
   const resetSend = () => {
@@ -915,14 +1105,14 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-gas-pump text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated fees</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">$0.12</span>
+          <span className="info-text font-semibold text-muted-fg">$0.09</span>
         </div>
         <div className="flex justify-between">
           <div className="flex gap-2 items-baseline">
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated send time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">5 - 10 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">2 - 3 minutes</span>
         </div>
       </div>
 
@@ -977,7 +1167,7 @@ export const BridgeForm: React.FC = () => {
         if (sendTx.status === 'idle') {
           return (
             <div className="flex justify-center">
-              <Button variant="submit" disabled={!validation.isValid} onClick={startSendSimulation} leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}>Send USDC</Button>
+              <Button variant="submit" disabled={!validation.isValid} onClick={sendNowViaOrbiter} leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}>Send USDC</Button>
             </div>
           )
         }
@@ -1055,7 +1245,11 @@ export const BridgeForm: React.FC = () => {
                 )}
               </div>
               <div className="flex items-center gap-3">
-                {typeof shieldedSyncProgress === 'number' ? (
+                {typeof balanceRefreshCountdown === 'number' ? (
+                  <div className="text-xs text-button-text-inactive">
+                    Refreshing balances in {balanceRefreshCountdown} seconds...
+                  </div>
+                ) : typeof shieldedSyncProgress === 'number' ? (
                   <div className="flex items-center gap-2 text-xs text-button-text-inactive">
                     <div className="w-32 h-2 bg-button-inactive/40 rounded-full overflow-hidden">
                       <div
@@ -1190,20 +1384,28 @@ export const BridgeForm: React.FC = () => {
                               return
                             }
                             const chainId = await fetchChainIdFromRpc((sdk as any).url)
+                            
+                            // Try to use custom USDC token, fallback to NAM
+                            const customUsdcToken = 'tnam1pkkyepxa05mn9naftfpqy3l665tehe859ccp2wts'
                             const namAddr = await getNAMAddressFromRegistry()
                             const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
-                            if (!namToken) {
-                              showToast({ title: 'IBC Debug', message: 'NAM token address not found', variant: 'error' })
+                            
+                            // Use custom USDC if defined, otherwise NAM
+                            const transferToken = customUsdcToken || namToken
+                            if (!transferToken) {
+                              showToast({ title: 'IBC Debug', message: 'No valid token address found', variant: 'error' })
                               return
                             }
-                            const amountInBase = new BigNumber(1)
-                            const gas = {
-                              gasToken: namToken,
-                              gasLimit: new BigNumber('75000'),
-                              gasPriceInMinDenom: new BigNumber('0.000001'),
-                            }
-                            const chain = { chainId, nativeTokenAddress: namToken }
-                            const receiver = 'noble1nfctx22mxedsrsf30a4pnkldw4hhfc4gd9uq5w'
+
+                            // Use NAM as gas token for IBC debug (gas token separate from transfer token)
+                            const txKinds: string[] = ['UnshieldingTransfer', 'IbcTransfer']
+                            const gas = await estimateGasForToken(namToken, txKinds, '75000')
+                            // Send 1 USDC (1 uusdc) or 1 NAM depending on token
+                            const amountInBase = transferToken === customUsdcToken 
+                              ? new BigNumber(1) // 1 uusdc = 1 USDC
+                              : new BigNumber(1) // 1 NAM
+                            const chain = { chainId, nativeTokenAddress: gas.gasToken }
+                            const receiver = 'noble1duaw0gnpy6cfvw0ey9phnv0ehjmyhsyztkeutx'
                             const channelId = 'channel-27'
                             // Generate disposable wrapper signer (ephemeral payer)
                             let accountPublicKey = ''
@@ -1249,7 +1451,7 @@ export const BridgeForm: React.FC = () => {
                                 ownerAddress: ownerAddressForWrapper,
                                 source: pseudoExtendedKey,
                                 receiver,
-                                tokenAddress: namToken,
+                                tokenAddress: transferToken,
                                 amountInBase,
                                 gas,
                                 chain,
@@ -1275,9 +1477,10 @@ export const BridgeForm: React.FC = () => {
                             const explorerUrl = chainId.startsWith('housefire')
                               ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
                               : `https://namada.world/transactions/${ibcHash?.toLowerCase()}`
+                            const tokenSymbol = transferToken === customUsdcToken ? 'USDC' : 'NAM'
                             showToast({
                               title: 'IBC Debug',
-                              message: `Submitted: ${hashDisplay}`,
+                              message: `Submitted: ${hashDisplay} (1 ${tokenSymbol})`,
                               variant: 'success',
                               ...(ibcHash && {
                                 action: {
@@ -1297,6 +1500,134 @@ export const BridgeForm: React.FC = () => {
                       >
                         <i className="fa-solid fa-paper-plane text-sm"></i>
                         <span>Debug IBC Outgoing</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            if (state.walletConnections.namada !== 'connected') {
+                              showToast({ title: 'Namada', message: 'Connect Namada Keychain first', variant: 'error' })
+                              return
+                            }
+                            if (!isReady || !sdk) {
+                              showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
+                              return
+                            }
+                            const transparent = state.addresses.namada.transparent
+                            const shielded = state.addresses.namada.shielded || ''
+                            if (!transparent || !shielded) {
+                              showToast({ title: 'Debug Orbiter', message: 'Missing Namada addresses', variant: 'error' })
+                              return
+                            }
+                            const chainId = await fetchChainIdFromRpc((sdk as any).url)
+
+                            // Hardcoded params per request
+                            const transferToken = 'tnam1pkkyepxa05mn9naftfpqy3l665tehe859ccp2wts'
+                            const amountInBase = new BigNumber(100) // 100 min-denom units
+                            const channelId = 'channel-27'
+                            const receiver = 'noble15xt7kx5mles58vkkfxvf0lq78sw04jajvfgd4d' // Noble Orbiter module address (testnet)
+                            const memo = buildOrbiterCctpMemo({
+                              destinationDomain: 0,
+                              evmRecipientHex20: '0x9dcadbfa2bca34faa28840c4fc391fc421a57921',
+                            })
+
+                            // Gas token: use NAM
+                            const namAddr = await getNAMAddressFromRegistry()
+                            const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+                            const txKinds: string[] = ['IbcTransfer']
+                            const gas = await estimateGasForToken(namToken, txKinds, '90000')
+                            const chain = { chainId, nativeTokenAddress: gas.gasToken }
+
+                            // Disposable wrapper if available
+                            let accountPublicKey = ''
+                            let ownerAddressForWrapper = transparent
+                            try {
+                              const namada: any = (window as any).namada
+                              const signer = await namada?.getSigner?.()
+                              const disposableWrapper = await signer?.genDisposableKeypair?.()
+                              if (disposableWrapper?.publicKey && disposableWrapper?.address) {
+                                accountPublicKey = disposableWrapper.publicKey
+                                ownerAddressForWrapper = disposableWrapper.address
+                              } else {
+                                accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+                              }
+                            } catch {
+                              accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+                            }
+
+                            // Use shielded source with MASP gas key
+                            const allAccounts = (await getNamadaAccounts()) as any[]
+                            const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
+                            const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
+                            if (!pseudoExtendedKey) {
+                              showToast({ title: 'Debug Orbiter', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' })
+                              return
+                            }
+
+                            // Optional refund target
+                            let refundTarget: string | undefined
+                            try {
+                              const namada: any = (window as any).namada
+                              const signer = await namada?.getSigner?.()
+                              const disposable = await signer?.genDisposableKeypair?.()
+                              refundTarget = disposable?.address
+                            } catch {}
+
+                            const result = await buildSignBroadcastUnshieldingIbc(
+                              {
+                                sdk: sdk as any,
+                                accountPublicKey,
+                                ownerAddress: ownerAddressForWrapper,
+                                source: pseudoExtendedKey,
+                                receiver,
+                                tokenAddress: transferToken,
+                                amountInBase,
+                                gas,
+                                chain,
+                                channelId,
+                                gasSpendingKey: pseudoExtendedKey,
+                                refundTarget,
+                                memo,
+                              },
+                              (phase) => {
+                                const map: Record<string, string> = {
+                                  'building:ibc': 'Building IBC transfer (Orbiter)',
+                                  'signing:ibc': 'Approve IBC in Keychain',
+                                  'submitting:ibc': 'Submitting IBC transfer...',
+                                  'submitted:ibc': 'IBC submitted',
+                                }
+                                const msg = map[phase]
+                                if (msg) showToast({ title: 'Debug Orbiter', message: msg, variant: 'info' })
+                              }
+                            )
+
+                            const ibcHash = (result.ibc.response as any)?.hash
+                            const hashDisplay = ibcHash ? `${ibcHash.slice(0, 8)}...${ibcHash.slice(-8)}` : 'OK'
+                            const explorerUrl = chainId.startsWith('housefire')
+                              ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
+                              : `https://namada.world/transactions/${ibcHash?.toLowerCase()}`
+                            showToast({
+                              title: 'Debug Orbiter',
+                              message: `Submitted: ${hashDisplay} (100 units)`,
+                              variant: 'success',
+                              ...(ibcHash && {
+                                action: {
+                                  label: 'View on explorer',
+                                  onClick: () => window.open(explorerUrl, '_blank'),
+                                  icon: <i className="fas fa-external-link-alt text-xs" />,
+                                }
+                              })
+                            })
+                            setShowMoreDropdown(false)
+                          } catch (e: any) {
+                            console.error('[Debug Orbiter] Error', e)
+                            showToast({ title: 'Debug Orbiter', message: e?.message ?? 'Failed', variant: 'error' })
+                          }
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
+                      >
+                        <i className="fa-solid fa-rocket text-sm"></i>
+                        <span>Debug Orbiter</span>
                       </button>
                       <button
                         type="button"
