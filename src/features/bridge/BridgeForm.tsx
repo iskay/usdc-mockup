@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import BigNumber from 'bignumber.js'
 import { Card, CardHeader } from '../../components/ui/Card'
+import { OutArrowIcon, CopyIcon } from '../../components/ui/Icons'
 import { Tabs } from '../../components/ui/Tabs'
 import { SelectMenu } from '../../components/ui/SelectMenu'
 import { Input } from '../../components/ui/Input'
@@ -18,7 +19,9 @@ import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalan
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
 import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
-import { buildOrbiterCctpMemo } from '../../utils/ibcMemo'
+import { buildOrbiterCctpMemo, evmHex20ToBase64_32 } from '../../utils/ibcMemo'
+import { fetchLatestHeight, pollNobleForOrbiter } from '../../utils/noblePoller'
+import { pollSepoliaUsdcMint } from '../../utils/evmPoller'
 import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable, fetchGasPriceForTokenAddress } from '../../utils/indexer'
 import { type TxProps } from '@namada/sdk-multicore'
 
@@ -276,7 +279,14 @@ export const BridgeForm: React.FC = () => {
 
 
   type TxStatus = 'idle' | 'submitting' | 'pending' | 'success'
-  type TxState = { status: TxStatus; hash?: string }
+  type TxState = {
+    status: TxStatus
+    hash?: string
+    namadaHash?: string
+    sepoliaHash?: string
+    stage?: string
+    namadaChainId?: string
+  }
   const [depositTx, setDepositTx] = useState<TxState>({ status: 'idle' })
   const [sendTx, setSendTx] = useState<TxState>({ status: 'idle' })
   const depositRunId = useRef(0)
@@ -417,6 +427,7 @@ export const BridgeForm: React.FC = () => {
         destinationDomain: 0,
         evmRecipientHex20: sendAddress,
       })
+      const mintRecipientB64 = evmHex20ToBase64_32(sendAddress)
 
       const namAddr = await getNAMAddressFromRegistry()
       const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
@@ -496,11 +507,12 @@ export const BridgeForm: React.FC = () => {
           }
           const msg = map[phase]
           if (msg) showToast({ title: 'Send', message: msg, variant: 'info' })
+          if (msg) setSendTx((t) => ({ ...t, stage: msg }))
         }
       )
 
       const ibcHash = (result.ibc.response as any)?.hash
-      setSendTx({ status: 'success', hash: ibcHash })
+      setSendTx({ status: 'success', hash: ibcHash, namadaHash: ibcHash, stage: 'Submitted to Namada', namadaChainId: chainId })
       const hashDisplay = ibcHash ? `${ibcHash.slice(0, 8)}...${ibcHash.slice(-8)}` : 'OK'
       const explorerUrl = chainId.startsWith('housefire')
         ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
@@ -508,7 +520,7 @@ export const BridgeForm: React.FC = () => {
       showToast({
         title: 'Send',
         message: `Submitted: ${hashDisplay} (${sendAmount} USDC)`,
-        variant: 'success',
+        variant: 'info',
         ...(ibcHash && {
           action: {
             label: 'View on explorer',
@@ -518,6 +530,62 @@ export const BridgeForm: React.FC = () => {
         })
       })
       console.groupEnd()
+
+      // Start Noble polling (ack + cctp), then EVM mint polling
+      try {
+        const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
+        const startHeight = (await fetchLatestHeight(nobleRpc)) + 1
+        const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
+        const nobleRes = await pollNobleForOrbiter({
+          nobleRpc,
+          startHeight,
+          memoJson: memo,
+          receiver,
+          amount: amountInBase.toString(),
+          destinationCallerB64,
+          mintRecipientB64,
+          destinationDomain: 0,
+          channelId,
+          timeoutMs: 5 * 60 * 1000,
+          intervalMs: 5000,
+        }, (u) => {
+          if (u.ackFound) {
+            setSendTx((t) => ({ ...t, stage: 'Received on Noble (IBC acknowledged)' }))
+          }
+          if (u.cctpFound) {
+            setSendTx((t) => ({ ...t, stage: 'Forwarding to Sepolia via CCTP' }))
+          }
+        })
+
+        if (nobleRes.cctpFound) {
+          const rpcUrl = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
+          const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+          const evm = await pollSepoliaUsdcMint({
+            rpcUrl,
+            usdcAddress: usdcAddr,
+            recipient: sendAddress,
+            amountBaseUnits: amountInBase.toString(),
+            timeoutMs: 5 * 60 * 1000,
+            intervalMs: 5000,
+          })
+          if (evm.found && evm.txHash) {
+            const link = `https://sepolia.etherscan.io/tx/${evm.txHash}`
+            showToast({
+              title: 'Sepolia',
+              message: 'USDC minted to destination',
+              variant: 'success',
+              action: {
+                label: 'View on Etherscan',
+                onClick: () => window.open(link, '_blank'),
+                icon: <i className="fas fa-external-link-alt text-xs" />,
+              }
+            })
+            setSendTx((t) => ({ ...t, sepoliaHash: evm.txHash, stage: 'Minted on Sepolia' }))
+          }
+        }
+      } catch (e) {
+        console.warn('[Polling] Noble/EVM status polling failed', e)
+      }
     } catch (e: any) {
       console.error('[Send Orbiter] Error', e)
       showToast({ title: 'Send', message: e?.message ?? 'Failed', variant: 'error' })
@@ -1172,16 +1240,13 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        const statusText =
-          sendTx.status === 'submitting' ? 'Submitting transaction...'
-            : sendTx.status === 'pending' ? 'Pending confirmation...'
-              : 'Success'
+        const statusText = sendTx.stage || (sendTx.status === 'submitting' ? 'Submitting transaction...' : sendTx.status === 'pending' ? 'Pending confirmation...' : 'Success')
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                {sendTx.status === 'success' ? (
+                {sendTx.stage === 'Minted on Sepolia' ? (
                   <i className="fa-solid fa-check-circle text-accent-green"></i>
                 ) : (
                   <Spinner size="sm" variant="accent" />
@@ -1190,9 +1255,35 @@ export const BridgeForm: React.FC = () => {
               </div>
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{sendAmount} USDC</span></div>
-                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground">{shorten(sendAddress)}</span></div>
+                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground flex items-center gap-2">{shorten(sendAddress)}
+                  <button onClick={() => { navigator.clipboard.writeText(sendAddress) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                  <button onClick={() => window.open(`https://sepolia.etherscan.io/address/${sendAddress}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                </span></div>
                 <div className="flex justify-between"><span>On chain</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label}</span></div>
-                <div className="flex justify-between"><span>Tx Hash</span><span className="font-mono text-xs text-foreground">{sendTx.hash?.slice(0, 10)}...{sendTx.hash?.slice(-8)}</span></div>
+                <div className="flex justify-between"><span>Namada Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  {sendTx.namadaHash ? (
+                    <>
+                      <span>{(sendTx.namadaHash as string).slice(0, 10)}...{(sendTx.namadaHash as string).slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(sendTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => {
+                        const hash = sendTx.namadaHash as string
+                        const url = (String(sendTx.namadaChainId || '').startsWith('housefire')
+                          ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
+                          : `https://namada.world/transactions/${hash.toLowerCase()}`)
+                        window.open(url, '_blank')
+                      }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                    </>
+                  ) : '—'}
+                </span></div>
+                <div className="flex justify-between"><span>Sepolia Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  {sendTx.sepoliaHash ? (
+                    <>
+                      <span>{sendTx.sepoliaHash.slice(0, 10)}...{sendTx.sepoliaHash.slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(sendTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${sendTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                    </>
+                  ) : '—'}
+                </span></div>
               </div>
             </div>
             <div className="text-center">
