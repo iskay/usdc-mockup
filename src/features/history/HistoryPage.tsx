@@ -41,8 +41,31 @@ export const HistoryPage: React.FC = () => {
                     </div>
                     <div className="text-sm text-foreground-secondary mt-1">
                       <div className="flex justify-between"><span>Route</span><span className="text-foreground font-medium">{label}</span></div>
-                      {tx.destination ? <div className="flex justify-between"><span>Destination</span><span className="font-mono text-xs text-foreground">{tx.destination}</span></div> : null}
-                      {tx.hash ? <div className="flex justify-between"><span>Hash</span><span className="font-mono text-xs text-foreground">{tx.hash}</span></div> : null}
+                      {tx.destination ? (
+                        <div className="flex justify-between"><span>Destination</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.destination}
+                          <button onClick={() => { navigator.clipboard.writeText(tx.destination as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                          <button onClick={() => window.open(`https://sepolia.etherscan.io/address/${tx.destination}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                        </span></div>
+                      ) : null}
+                      {tx.stage ? <div className="flex justify-between"><span>Stage</span><span className="text-foreground font-medium">{tx.stage}</span></div> : null}
+                      {tx.namadaHash ? (
+                        <div className="flex justify-between"><span>Namada Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.namadaHash}
+                          <button onClick={() => { navigator.clipboard.writeText(tx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                          <button onClick={() => {
+                            const hash = tx.namadaHash as string
+                            const url = (typeof (tx as any).namadaChainId === 'string' && (tx as any).namadaChainId.startsWith('housefire'))
+                              ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
+                              : `https://namada.world/transactions/${hash.toLowerCase()}`
+                            window.open(url, '_blank')
+                          }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                        </span></div>
+                      ) : null}
+                      {tx.sepoliaHash ? (
+                        <div className="flex justify-between"><span>Sepolia Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.sepoliaHash}
+                          <button onClick={() => { navigator.clipboard.writeText(tx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                          <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${tx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                        </span></div>
+                      ) : null}
                       <div className="flex justify-between"><span>Status</span><span className="text-foreground font-medium">{tx.status}</span></div>
                     </div>
                   </div>

@@ -291,6 +291,42 @@ export const BridgeForm: React.FC = () => {
   const [sendTx, setSendTx] = useState<TxState>({ status: 'idle' })
   const depositRunId = useRef(0)
   const sendRunId = useRef(0)
+  const currentSendTxIdRef = useRef<string | null>(null)
+
+  // Persist Send form pending state across navigation by syncing with global transactions
+  useEffect(() => {
+    try {
+      // Initialize from most recent pending send tx if no current id
+      if (!currentSendTxIdRef.current) {
+        const pending = state.transactions.find((t) => t.kind === 'send' && t.status === 'pending')
+        if (pending) {
+          currentSendTxIdRef.current = pending.id
+          if (pending.amount) setSendAmount(pending.amount)
+          if (pending.destination) setSendAddress(pending.destination)
+          setSendTx((t) => ({
+            ...t,
+            status: pending.stage === 'Minted on Sepolia' ? 'success' : 'pending',
+            stage: pending.stage,
+            namadaHash: pending.namadaHash,
+            sepoliaHash: pending.sepoliaHash,
+            namadaChainId: pending.namadaChainId,
+          }))
+        }
+      } else {
+        const tx = state.transactions.find((t) => t.id === currentSendTxIdRef.current)
+        if (tx) {
+          setSendTx((t) => ({
+            ...t,
+            status: tx.stage === 'Minted on Sepolia' ? 'success' : 'pending',
+            stage: tx.stage,
+            namadaHash: tx.namadaHash,
+            sepoliaHash: tx.sepoliaHash,
+            namadaChainId: tx.namadaChainId,
+          }))
+        }
+      }
+    } catch {}
+  }, [state.transactions])
 
   const generateHash = () => `0x${Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map((b) => b.toString(16).padStart(2, '0'))
@@ -508,11 +544,58 @@ export const BridgeForm: React.FC = () => {
           const msg = map[phase]
           if (msg) showToast({ title: 'Send', message: msg, variant: 'info' })
           if (msg) setSendTx((t) => ({ ...t, stage: msg }))
+          if (msg) {
+            // Reflect stage globally pre-submission with a stable id
+            if (!currentSendTxIdRef.current) {
+              currentSendTxIdRef.current = `send_${Date.now()}`
+              dispatch({
+                type: 'ADD_TRANSACTION',
+                payload: {
+                  id: currentSendTxIdRef.current,
+                  kind: 'send',
+                  amount: sendAmount,
+                  fromChain: 'namada',
+                  toChain: 'sepolia',
+                  destination: sendAddress,
+                  stage: msg,
+                  status: 'pending',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                },
+              })
+            } else {
+              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: currentSendTxIdRef.current, changes: { stage: msg } } })
+            }
+          }
         }
       )
 
       const ibcHash = (result.ibc.response as any)?.hash
       setSendTx({ status: 'success', hash: ibcHash, namadaHash: ibcHash, stage: 'Submitted to Namada', namadaChainId: chainId })
+      // Merge into the same global tx id created earlier or create if missing
+      const txId = currentSendTxIdRef.current || `send_${Date.now()}`
+      if (!currentSendTxIdRef.current) {
+        currentSendTxIdRef.current = txId
+        dispatch({
+          type: 'ADD_TRANSACTION',
+          payload: {
+            id: txId,
+            kind: 'send',
+            amount: sendAmount,
+            fromChain: 'namada',
+            toChain: 'sepolia',
+            destination: sendAddress,
+            hash: ibcHash,
+            namadaHash: ibcHash,
+            stage: 'Submitted to Namada',
+            status: 'pending',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        })
+      } else {
+        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { hash: ibcHash, namadaHash: ibcHash, stage: 'Submitted to Namada' } } })
+      }
       const hashDisplay = ibcHash ? `${ibcHash.slice(0, 8)}...${ibcHash.slice(-8)}` : 'OK'
       const explorerUrl = chainId.startsWith('housefire')
         ? `https://testnet.namada.world/transactions/${ibcHash?.toLowerCase()}`
@@ -531,60 +614,65 @@ export const BridgeForm: React.FC = () => {
       })
       console.groupEnd()
 
-      // Start Noble polling (ack + cctp), then EVM mint polling
+      // Start dedicated worker for this tx to poll Noble + Sepolia in isolation
       try {
         const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
         const startHeight = (await fetchLatestHeight(nobleRpc)) + 1
         const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
-        const nobleRes = await pollNobleForOrbiter({
-          nobleRpc,
-          startHeight,
-          memoJson: memo,
-          receiver,
-          amount: amountInBase.toString(),
-          destinationCallerB64,
-          mintRecipientB64,
-          destinationDomain: 0,
-          channelId,
-          timeoutMs: 5 * 60 * 1000,
-          intervalMs: 5000,
-        }, (u) => {
-          if (u.ackFound) {
-            setSendTx((t) => ({ ...t, stage: 'Received on Noble (IBC acknowledged)' }))
-          }
-          if (u.cctpFound) {
-            setSendTx((t) => ({ ...t, stage: 'Forwarding to Sepolia via CCTP' }))
-          }
-        })
-
-        if (nobleRes.cctpFound) {
-          const rpcUrl = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
-          const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
-          const evm = await pollSepoliaUsdcMint({
-            rpcUrl,
-            usdcAddress: usdcAddr,
-            recipient: sendAddress,
-            amountBaseUnits: amountInBase.toString(),
-            timeoutMs: 5 * 60 * 1000,
-            intervalMs: 5000,
-          })
-          if (evm.found && evm.txHash) {
-            const link = `https://sepolia.etherscan.io/tx/${evm.txHash}`
-            showToast({
-              title: 'Sepolia',
-              message: 'USDC minted to destination',
-              variant: 'success',
-              action: {
-                label: 'View on Etherscan',
-                onClick: () => window.open(link, '_blank'),
-                icon: <i className="fas fa-external-link-alt text-xs" />,
-              }
-            })
-            setSendTx((t) => ({ ...t, sepoliaHash: evm.txHash, stage: 'Minted on Sepolia' }))
+        const sepoliaRpc = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
+        const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+        const worker = new Worker(new URL('../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
+        worker.onmessage = (ev: MessageEvent) => {
+          const data = ev.data as any
+          if (data.type === 'update' && data.id === txId) {
+            const changes: any = {}
+            if (data.data.stage) changes.stage = data.data.stage
+            if (typeof data.data.nobleAckFound === 'boolean') changes.nobleAckFound = data.data.nobleAckFound
+            if (typeof data.data.nobleCctpFound === 'boolean') changes.nobleCctpFound = data.data.nobleCctpFound
+            if (Object.keys(changes).length) {
+              setSendTx((t) => ({ ...t, ...changes }))
+              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes } })
+            }
+          } else if (data.type === 'complete' && data.id === txId) {
+            if (data.data?.sepoliaHash) {
+              setSendTx((t) => ({ ...t, sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia' }))
+              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia', status: 'success' } } })
+            }
+            worker.terminate()
+          } else if (data.type === 'error' && data.id === txId) {
+            console.error('[OrbiterTxWorker] error', data.error)
+            worker.terminate()
           }
         }
+        worker.postMessage({
+          type: 'start',
+          payload: {
+            id: txId,
+            noble: {
+              rpcUrl: nobleRpc,
+              startHeight,
+              memoJson: memo,
+              receiver,
+              amount: amountInBase.toString(),
+              destinationCallerB64,
+              mintRecipientB64,
+              destinationDomain: 0,
+              channelId,
+              timeoutMs: 5 * 60 * 1000,
+              intervalMs: 5000,
+            },
+            sepolia: {
+              rpcUrl: sepoliaRpc,
+              usdcAddress: usdcAddr,
+              recipient: sendAddress,
+              amountBaseUnits: amountInBase.toString(),
+              timeoutMs: 5 * 60 * 1000,
+              intervalMs: 5000,
+            },
+          }
+        })
       } catch (e) {
-        console.warn('[Polling] Noble/EVM status polling failed', e)
+        console.warn('[Polling Worker] spawn/start failed', e)
       }
     } catch (e: any) {
       console.error('[Send Orbiter] Error', e)
@@ -1286,10 +1374,12 @@ export const BridgeForm: React.FC = () => {
                 </span></div>
               </div>
             </div>
-            <div className="text-center">
-              <div className="text-sm text-foreground-secondary mb-3">You can view the status of this transaction in the My Transactions page</div>
-              <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetSend}>Start new transaction</Button>
-            </div>
+            {sendTx.stage && sendTx.stage !== 'Building IBC transfer' && (
+              <div className="text-center">
+                <div className="text-sm text-foreground-secondary mb-3">You can follow the status of this transaction in the My Transactions page</div>
+                <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetSend}>Start new transaction</Button>
+              </div>
+            )}
           </div>
         )
       })()}

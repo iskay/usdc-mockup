@@ -31,6 +31,13 @@ export type Transaction = {
   toChain?: string
   destination?: string
   hash?: string
+  // Extended tracking for bridge/orbiter flows
+  stage?: string
+  namadaHash?: string
+  sepoliaHash?: string
+  nobleAckFound?: boolean
+  nobleCctpFound?: boolean
+  namadaChainId?: string
   status: TransactionPhase
   createdAt: number
   updatedAt: number
