@@ -106,7 +106,10 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           console.log('Namada extension not available')
           return
         }
-        const connected = await checkNamada()
+        // Get current chain ID from SDK
+        const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
+        const chainId = await fetchChainIdFromRpc((sdk as any).url)
+        const connected = await checkNamada(chainId)
         if (connected) {
           console.log('Found existing Namada connection')
           const acct = await getDefaultAccount()
@@ -272,8 +275,11 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         showToast({ title: 'Namada Keychain', message: 'Please install the Namada Keychain extension', variant: 'error' })
         return
       }
-      await connectNamada()
-      const connected = await checkNamada()
+      // Get current chain ID from SDK
+      const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
+      const chainId = await fetchChainIdFromRpc((sdk as any).url)
+      await connectNamada(chainId)
+      const connected = await checkNamada(chainId)
       if (connected) {
         const acct = await getDefaultAccount()
         dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })

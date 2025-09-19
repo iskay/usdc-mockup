@@ -78,6 +78,27 @@ export async function fetchGasPriceTable(): Promise<GasPriceEntry[]> {
 }
 
 
+// Dedicated helper mirroring Namadillo's IBC unshielding gas estimator.
+// Some indexers expose a combined metric under `ibc_unshielding_transfer`.
+// Example response: {"min":6925,"max":300140,"avg":84020,"totalEstimates":37330}
+export async function fetchGasEstimateIbcUnshieldingTransfer(): Promise<GasEstimate> {
+  const url = `${getIndexerUrl()}/api/v1/gas/estimate?ibc_unshielding_transfer=0`
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Indexer HTTP ${res.status}`)
+    const data = await res.json()
+    return {
+      min: Number((data && (data.min ?? data.Min)) ?? 50000),
+      avg: Number((data && (data.avg ?? data.Avg)) ?? 50000),
+      max: Number((data && (data.max ?? data.Max)) ?? 50000),
+      totalEstimates: Number((data && (data.totalEstimates ?? data.TotalEstimates)) ?? 0),
+    }
+  } catch (e) {
+    console.error('[Indexer] fetchGasEstimateIbcUnshieldingTransfer failed', e)
+    return { min: 50000, avg: 50000, max: 50000, totalEstimates: 0 }
+  }
+}
+
 // Check whether a specific token address is a valid gas token in the indexer.
 // Endpoint returns an array; if empty -> not a valid gas token.
 // Example response: [{ token: { address: "tnam..." }, minDenomAmount: "1" }]
