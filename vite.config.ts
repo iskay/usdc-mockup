@@ -43,6 +43,10 @@ export default defineConfig({
       ],
     },
   },
+  worker: {
+    // Ensure workers use ESM format to support code-splitting in production builds
+    format: 'es',
+  },
   // build: {
   //   rollupOptions: {
   //     plugins: [

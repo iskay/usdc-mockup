@@ -29,7 +29,7 @@ export type WorkerEvent =
   | { type: 'complete'; id: string; data: { sepoliaHash?: string } }
   | { type: 'error'; id: string; error: string }
 
-declare const self: DedicatedWorkerGlobalScope
+declare const self: Worker
 
 async function httpJson(url: string): Promise<any> {
   const res = await fetch(url)

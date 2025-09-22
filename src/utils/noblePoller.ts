@@ -70,7 +70,7 @@ export async function pollNobleForOrbiter(inputs: NobleTrackInputs, onUpdate?: (
               if (packetDataRaw) {
                 const parsed = parseMaybeJsonOrBase64Json(packetDataRaw)
                 // Handle double-encoded JSON string
-                const parsed2 = typeof parsed === 'string' ? safelyParseJson(parsed) : parsed
+                const parsed2 = typeof parsed === 'string' ? (() => { try { return JSON.parse(parsed) } catch { return parsed } })() : parsed
                 const denom = parsed?.denom
                 const amount = parsed?.amount
                 const receiver = parsed?.receiver
