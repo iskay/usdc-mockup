@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { sdkMulticoreWorkerHelpers } from '@namada/vite-esbuild-plugin'
+import inject from '@rollup/plugin-inject'
 
 import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfill'
 // import { NodeModulesPolyfillPlugin } from '@esbuild-plugins/node-modules-polyfill'
@@ -11,6 +12,10 @@ import { NodeGlobalsPolyfillPlugin } from '@esbuild-plugins/node-globals-polyfil
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    // Ensure global is defined in production preview builds
+    global: 'globalThis',
+  },
   plugins: [
     tailwindcss(),
     react(),
@@ -46,6 +51,16 @@ export default defineConfig({
   worker: {
     // Ensure workers use ESM format to support code-splitting in production builds
     format: 'es',
+  },
+  build: {
+    rollupOptions: {
+      plugins: [
+        // Provide Buffer global at runtime in preview/production
+        inject({
+          Buffer: ['buffer', 'Buffer'],
+        }),
+      ],
+    },
   },
   // build: {
   //   rollupOptions: {
