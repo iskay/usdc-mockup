@@ -181,6 +181,121 @@ export const BridgeForm: React.FC = () => {
     }
   }
 
+  // Reusable function: triggers the same logic as clicking the Shielded Sync button
+  const triggerShieldedSync = async () => {
+    try {
+      if (!isReady || !sdk || !rpc) {
+        showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
+        return
+      }
+      setShieldedSyncProgress(0)
+      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: true })
+      const acct = await getDefaultAccount()
+      if (!acct) {
+        showToast({ title: 'Shielded Sync', message: 'No Namada account connected', variant: 'error' })
+        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
+        setShieldedSyncProgress(null)
+        return
+      }
+      const available = await isNamadaAvailable()
+      if (!available) {
+        showToast({ title: 'Shielded Sync', message: 'Namada Keychain not available', variant: 'error' })
+        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
+        setShieldedSyncProgress(null)
+        return
+      }
+      const allAccounts = (await getNamadaAccounts()) as any[]
+      const shielded = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
+      const vks: DatedViewingKey[] = []
+      for (const a of shielded) {
+        let birthday = 0
+        if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
+          try {
+            birthday = await fetchBlockHeightByTimestamp(a.timestamp)
+          } catch { }
+        }
+        vks.push({ key: String(a.viewingKey), birthday })
+      }
+      if (vks.length === 0) {
+        showToast({ title: 'Shielded Sync', message: 'No viewing keys found. Ensure a shielded account exists and this site is connected in Keychain.', variant: 'warning' })
+        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
+        setShieldedSyncProgress(null)
+        return
+      }
+      const logFull = ((import.meta as any)?.env?.VITE_DEBUG_LOG_FULL_VK as string | undefined) === 'true'
+      vks.forEach(({ key, birthday }) => {
+        const masked = `${key.slice(0, 12)}...${key.slice(-8)}`
+        const toLog = logFull ? key : masked
+        console.info('[Shielded Sync] Using viewing key:', toLog, 'birthday:', birthday)
+      })
+      const chainId = await fetchChainIdFromRpc((sdk as any).url)
+      const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
+      await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
+      await runShieldedSync({
+        sdk: sdk as any,
+        viewingKeys: vks,
+        chainId,
+        maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
+        onProgress: (p) => setShieldedSyncProgress(Math.round(p * 100)),
+      })
+      // Fetch shielded USDC and NAM for the first available viewing key
+      try {
+        const firstVk = vks[0]?.key
+        if (firstVk) {
+          const [usdcAddr, namAddr] = await Promise.all([
+            getUSDCAddressFromRegistry(),
+            getNAMAddressFromRegistry(),
+          ])
+          const tokens = [usdcAddr, namAddr].filter((x): x is string => typeof x === 'string' && x.length > 0)
+          const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens, chainId)
+          const map = new Map<string, string>(balances)
+          if (usdcAddr) {
+            const usdcMin = map.get(usdcAddr) || '0'
+            setUsdcShieldedMinDenom(usdcMin)
+            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(usdcMin, 'USDC') } } })
+          }
+          if (namAddr) {
+            const namMin = map.get(namAddr) || '0'
+            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(namMin, 'NAM') } } })
+          }
+        }
+      } catch { }
+      showToast({ title: 'Shielded Sync', message: 'Completed', variant: 'success' })
+      setShieldedSyncProgress(100)
+    } catch (e: any) {
+      console.error('[Shielded Sync] Error', e)
+      showToast({ title: 'Shielded Sync', message: e?.message ?? 'Failed', variant: 'error' })
+    } finally {
+      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
+      setTimeout(() => setShieldedSyncProgress(null), 1500)
+    }
+  }
+
+  // Listen for a global trigger to start shielded sync (e.g., after connecting Namada)
+  useEffect(() => {
+    const handler = () => {
+      if (state.isShieldedSyncing) return
+      
+      // Wait for SDK to be ready with retry mechanism
+      const attemptSync = async (retryCount = 0) => {
+        if (!isReady || !sdk) {
+          if (retryCount < 10) { // Max 10 retries (5 seconds)
+            setTimeout(() => attemptSync(retryCount + 1), 500)
+            return
+          }
+          console.warn('[Shielded Sync] SDK not ready after retries, skipping auto sync')
+          return
+        }
+        void triggerShieldedSync()
+      }
+      
+      void attemptSync()
+    }
+    window.addEventListener('shielded-sync:trigger', handler as any)
+    return () => window.removeEventListener('shielded-sync:trigger', handler as any)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.isShieldedSyncing, isReady, sdk])
+
   // Helper: generic shielding flow (shared by USDC and NAM buttons)
   const shieldNowForToken = async (
     tokenAddress: string,
@@ -641,6 +756,24 @@ export const BridgeForm: React.FC = () => {
           }
         })
       })
+      
+      // Delay then refresh shielded balances with countdown (mirror shield flow)
+      setBalanceRefreshCountdown(10)
+      const countdownInterval = setInterval(() => {
+        setBalanceRefreshCountdown(prev => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval)
+            return null
+          }
+          return prev - 1
+        })
+      }, 1000)
+      
+      setTimeout(async () => {
+        await refreshShieldedAfterTx(chainId)
+        clearInterval(countdownInterval)
+        setBalanceRefreshCountdown(null)
+      }, 10000)
       console.groupEnd()
 
       // Start dedicated worker for this tx to poll Noble + Sepolia in isolation

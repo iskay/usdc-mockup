@@ -126,6 +126,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             console.log('Namada account:', acct, 'Shielded paired:', shielded)
           }
           showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
+          try { window.dispatchEvent(new Event('shielded-sync:trigger')) } catch {}
         } else {
           console.log('No existing Namada connection found')
         }
@@ -294,6 +295,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           })
         }
         showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })
+        try { window.dispatchEvent(new Event('shielded-sync:trigger')) } catch {}
       } else {
         showToast({ title: 'Namada Keychain', message: 'Failed to connect', variant: 'error' })
       }
