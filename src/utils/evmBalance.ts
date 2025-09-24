@@ -162,7 +162,7 @@ export async function fetchUsdcBalanceForSelectedChain(
     usdc.symbol(),
   ])
   const raw = Number(ethers.formatUnits(rawBalance, decimals))
-  const formattedBalance = (raw === 0 ? 0 : raw).toFixed(2)
+  const formattedBalance = (raw === 0 ? 0 : raw).toFixed(6)
   return { formattedBalance, symbol, networkName: network.name }
 }
 

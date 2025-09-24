@@ -10,12 +10,16 @@ import { useAppState } from '../../state/AppState'
 import { useToast } from '../../components/ui/Toast'
 import { PixelRow, pixelColors } from '../../components/layout/Pixels'
 import Spinner from '../../components/ui/Spinner'
+import { depositForBurnSepolia } from '../../utils/evmCctp'
+import { encodeBech32ToBytes32 } from '../../utils/forwarding'
 import { fetchUsdcBalanceForSelectedChain } from '../../utils/evmBalance'
 import { getNamadaUSDCBalance, getNamadaNAMBalance } from '../../utils/namadaBalance'
 import { useNamadaSdk } from '../../state/NamadaSdkProvider'
 import { useNamadaKeychain } from '../../utils/namada'
 import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewingKey, fetchChainIdFromRpc } from '../../utils/shieldedSync'
 import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalance'
+import { fetchLatestHeight as fetchNobleLatestHeight, pollNobleForDeposit } from '../../utils/noblePoller'
+import { fetchLatestHeight as fetchNamadaLatestHeight, pollNamadaForDeposit } from '../../utils/namadaPoller'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
 import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
@@ -27,8 +31,8 @@ import { type TxProps } from '@namada/sdk-multicore'
 
 const chains = [
   { label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' },
-  { label: 'Ethereum', value: 'ethereum', iconUrl: '/ethereum-logo.svg' },
-  { label: 'Base', value: 'base', iconUrl: '/base-logo.svg' },
+  // { label: 'Ethereum', value: 'ethereum', iconUrl: '/ethereum-logo.svg' },
+  // { label: 'Base', value: 'base', iconUrl: '/base-logo.svg' },
   // { label: 'Polygon', value: 'polygon', iconUrl: '/polygon-logo.svg' },
   // { label: 'Arbitrum', value: 'arbitrum', iconUrl: '/arb-logo.svg' },
 ]
@@ -435,6 +439,7 @@ export const BridgeForm: React.FC = () => {
   const [sendTx, setSendTx] = useState<TxState>({ status: 'idle' })
   const depositRunId = useRef(0)
   const sendRunId = useRef(0)
+  const currentDepositTxIdRef = useRef<string | null>(null)
   const currentSendTxIdRef = useRef<string | null>(null)
 
   // Persist Send form pending state across navigation by syncing with global transactions
@@ -515,9 +520,174 @@ export const BridgeForm: React.FC = () => {
     }, 30000)
   }
 
+  const startSepoliaDeposit = async () => {
+    try {
+      if (!window.ethereum) {
+        showToast({ title: 'MetaMask Not Found', message: 'Please install the MetaMask extension', variant: 'error' })
+        return
+      }
+
+      const amountNow = depositAmount
+      const toNow = depositAddress
+      const validation = validateForm(amountNow, getAvailableBalance(chain), toNow)
+      if (!validation.isValid) return
+
+      setDepositTx({ status: 'submitting' })
+      const txId = currentDepositTxIdRef.current || `dep_${Date.now()}`
+      if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
+      dispatch({
+        type: 'ADD_TRANSACTION',
+        payload: {
+          id: txId,
+          kind: 'deposit',
+          amount: amountNow,
+          fromChain: 'sepolia',
+          toChain: 'namada',
+          destination: toNow,
+          status: 'submitting',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      })
+
+      const forwardingAddress = await (async () => {
+        const channelId = (import.meta as any)?.env?.VITE_NOBLE_TO_NAMADA_CHANNEL || 'channel-136'
+        const lcdUrl = (import.meta as any)?.env?.VITE_NOBLE_LCD_URL
+        console.log('🔍 Fetching Noble forwarding address...')
+        console.log('   Channel:', channelId)
+        console.log('   LCD URL:', lcdUrl)
+        console.log('   Namada recipient:', toNow)
+        
+        if (!lcdUrl) throw new Error('VITE_NOBLE_LCD_URL not set')
+        const url = `${lcdUrl}/noble/forwarding/v1/address/${channelId}/${toNow}/`
+        console.log('   Fetching:', url)
+        
+        const res = await fetch(url)
+        if (!res.ok) {
+          const errorText = await res.text()
+          console.error('   LCD response error:', res.status, errorText)
+          throw new Error(`Failed to fetch forwarding address: ${res.status} - ${errorText}`)
+        }
+        const data = await res.json()
+        console.log('   LCD response:', data)
+        if (!data?.address) throw new Error('No forwarding address returned')
+        console.log('   ✅ Forwarding address:', data.address)
+        return data.address as string
+      })()
+
+      console.log('🔧 Encoding forwarding address to bytes32...')
+      const mintRecipient = encodeBech32ToBytes32(forwardingAddress)
+      console.log('   ✅ Encoded bytes32:', mintRecipient)
+      
+      const tokenMessenger = (import.meta as any)?.env?.VITE_SEPOLIA_TOKEN_MESSENGER as string
+      const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+      const destinationDomain = Number((import.meta as any)?.env?.VITE_NOBLE_DOMAIN_ID ?? 4)
+      
+      console.log('📋 Contract addresses:')
+      console.log('   TokenMessenger:', tokenMessenger)
+      console.log('   USDC:', usdcAddr)
+      console.log('   Destination Domain:', destinationDomain)
+      
+      if (!tokenMessenger) throw new Error('VITE_SEPOLIA_TOKEN_MESSENGER not set')
+      if (!usdcAddr) throw new Error('VITE_USDC_SEPOLIA not set')
+
+      const { txHash } = await depositForBurnSepolia({
+        amountUsdc: amountNow,
+        forwardingAddressBytes32: mintRecipient,
+        usdcAddress: usdcAddr,
+        tokenMessengerAddress: tokenMessenger,
+        destinationDomain,
+      })
+
+      setDepositTx({ status: 'pending', hash: txHash, sepoliaHash: txHash, stage: 'Burned on Sepolia' })
+      dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'pending', hash: txHash } } })
+      showToast({ title: 'Deposit', message: 'Pending confirmation…', variant: 'warning' })
+
+      // Notify backend tracker with Noble forwarding address for auto-registration
+      try {
+        const backendBase = (import.meta as any)?.env?.VITE_BACKEND_BASE || 'http://localhost:8080'
+        const channelId = (import.meta as any)?.env?.VITE_NOBLE_TO_NAMADA_CHANNEL || 'channel-136'
+        console.log('📨 Notifying backend tracker:', { backendBase, forwardingAddress, recipient: toNow, channelId })
+        await fetch(`${backendBase.replace(/\/$/, '')}/api/track`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ address: forwardingAddress, recipient: toNow, channel: channelId }),
+        })
+      } catch (e: any) {
+        console.warn('Tracker notify failed:', e?.message || e)
+      }
+
+      // Start Noble deposit polling
+      try {
+        const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
+        if (!nobleRpc) throw new Error('VITE_NOBLE_RPC not set')
+        const startHeight = (await fetchNobleLatestHeight(nobleRpc)) + 1
+        const expectedAmountUusdc = `${Math.round(Number(amountNow) * 1e6)}uusdc`
+        const namadaReceiver = toNow
+        console.log('[Deposit Poller] Starting Noble poll', { nobleRpc, startHeight, forwardingAddress, expectedAmountUusdc, namadaReceiver })
+        void pollNobleForDeposit({
+          nobleRpc,
+          startHeight,
+          forwardingAddress,
+          expectedAmountUusdc,
+          namadaReceiver,
+        }, (u) => {
+          try {
+            if (u.receivedFound) {
+              showToast({ title: 'Deposit', message: 'Received on Noble', variant: 'success' })
+              setDepositTx((t) => ({ ...t, stage: 'Received on Noble' }))
+              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { stage: 'Received on Noble' } } })
+              // Start Namada poller once Noble receipt is detected
+              const namadaRpc = (import.meta as any)?.env?.VITE_NAMADA_RPC_URL as string
+              if (namadaRpc) {
+                void (async () => {
+                  try {
+                    const latestN = await fetchNamadaLatestHeight(namadaRpc)
+                    const nStart = Math.max(1, latestN - 3) // small safety window
+                    console.log('[Deposit Poller] Starting Namada poll', { namadaRpc, latestN, nStart, forwardingAddress, namadaReceiver })
+                    await pollNamadaForDeposit({
+                      namadaRpc,
+                      startHeight: nStart,
+                      forwardingAddress,
+                      namadaReceiver,
+                      denom: 'uusdc',
+                    }, async (nu) => {
+                      if (nu.ackFound) {
+                        showToast({ title: 'Deposit', message: 'Received on Namada', variant: 'success' })
+                        // Get chain ID for explorer link
+                        const chainId = await fetchChainIdFromRpc((sdk as any).url)
+                        setDepositTx((t) => ({ ...t, status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId }))
+                        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId } } })
+                      }
+                    })
+                  } catch (e) {
+                    console.warn('[Deposit Poller] Namada poll start failed', e)
+                  }
+                })()
+              } else {
+                console.warn('[Deposit Poller] VITE_NAMADA_RPC_URL not set; Namada poller not started')
+              }
+            }
+            if (u.forwardFound) {
+              showToast({ title: 'Deposit', message: 'Forwarding to Namada', variant: 'success' })
+              setDepositTx((t) => ({ ...t, stage: 'Forwarding to Namada' }))
+              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { stage: 'Forwarding to Namada' } } })
+            }
+          } catch {}
+        })
+      } catch (e) {
+        console.warn('[Deposit Poller] Noble poll start failed', e)
+      }
+    } catch (err: any) {
+      setDepositTx({ status: 'idle' })
+      showToast({ title: 'Deposit Failed', message: err?.message ?? 'Transaction failed', variant: 'error' })
+    }
+  }
+
   const resetDeposit = () => {
     depositRunId.current++
-    setDepositTx({ status: 'idle' })
+      setDepositTx({ status: 'idle' })
+      currentDepositTxIdRef.current = null
     setDepositAmount('')
     setDepositAddress('')
   }
@@ -1241,14 +1411,14 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-gas-pump text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated fees</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">$2.14</span>
+          <span className="info-text font-semibold text-muted-fg">$--</span>
         </div>
         <div className="flex justify-between">
           <div className="flex gap-2 items-baseline">
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated deposit time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">20 - 25 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">3 - 5 minutes</span>
         </div>
       </div>
 
@@ -1304,7 +1474,13 @@ export const BridgeForm: React.FC = () => {
               <Button
                 variant="submit"
                 disabled={!validation.isValid}
-                onClick={startDepositSimulation}
+                onClick={() => {
+                  if (chain === 'sepolia') {
+                    void startSepoliaDeposit()
+                  } else {
+                    startDepositSimulation()
+                  }
+                }}
                 leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
               >
                 Deposit USDC
@@ -1313,16 +1489,13 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        const statusText =
-          depositTx.status === 'submitting' ? 'Submitting transaction...'
-            : depositTx.status === 'pending' ? 'Pending confirmation...'
-              : 'Success'
+        const statusText = depositTx.stage || (depositTx.status === 'submitting' ? 'Submitting transaction...' : 'Pending confirmation...')
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                {depositTx.status === 'success' ? (
+                {depositTx.stage === 'Received on Namada' ? (
                   <i className="fa-solid fa-check-circle text-accent-green"></i>
                 ) : (
                   <Spinner size="sm" variant="accent" />
@@ -1333,7 +1506,30 @@ export const BridgeForm: React.FC = () => {
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{depositAmount} USDC</span></div>
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground">{shorten(depositAddress)}</span></div>
                 <div className="flex justify-between"><span>On</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label} → Namada</span></div>
-                <div className="flex justify-between"><span>Tx Hash</span><span className="font-mono text-xs text-foreground">{depositTx.hash?.slice(0, 10)}...{depositTx.hash?.slice(-8)}</span></div>
+                <div className="flex justify-between"><span>Sepolia Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  {depositTx.sepoliaHash ? (
+                    <>
+                      <span>{depositTx.sepoliaHash.slice(0, 10)}...{depositTx.sepoliaHash.slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(depositTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${depositTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                    </>
+                  ) : '—'}
+                </span></div>
+                <div className="flex justify-between"><span>Namada Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  {depositTx.namadaHash ? (
+                    <>
+                      <span>{(depositTx.namadaHash as string).slice(0, 10)}...{(depositTx.namadaHash as string).slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(depositTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => {
+                        const hash = depositTx.namadaHash as string
+                        const url = (String(depositTx.namadaChainId || '').startsWith('housefire')
+                          ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
+                          : `https://namada.world/transactions/${hash.toLowerCase()}`)
+                        window.open(url, '_blank')
+                      }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                    </>
+                  ) : '—'}
+                </span></div>
               </div>
             </div>
             <div className="text-center">
@@ -1539,7 +1735,7 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated send time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">1 - 3 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">2 - 5 minutes</span>
         </div>
       </div>
 
@@ -2138,7 +2334,15 @@ export const BridgeForm: React.FC = () => {
                       showToast({ title: 'Shield', message: 'USDC address not found', variant: 'error' })
                       return
                     }
-                    await shieldNowForToken(usdcAddr, 'USDC')
+                    const available = state.balances.namada.usdcTransparent
+                    const amt = typeof available === 'string' ? available.replace(/,/g, '') : String(available)
+                    const n = new BigNumber(amt)
+                    if (!n.isFinite() || n.lte(0)) {
+                      showToast({ title: 'Shield', message: 'No transparent USDC available', variant: 'warning' })
+                      return
+                    }
+                    const amountInBase = n.multipliedBy(1e6)
+                    await shieldNowForToken(usdcAddr, 'USDC', { amountInBase })
                   } catch (e: any) {
                     console.error('[Shield USDC] Error', e)
                     showToast({ title: 'Shield', message: e?.message ?? 'Failed', variant: 'error' })

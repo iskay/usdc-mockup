@@ -22,6 +22,7 @@ export type NobleTrackResult = {
 type BlockResults = {
   result?: {
     txs_results?: { events?: { type: string; attributes?: { key: string; value: string; index?: boolean }[] }[] }[]
+    finalize_block_events?: { type: string; attributes?: { key: string; value: string; index?: boolean }[] }[]
   }
 }
 
@@ -129,6 +130,90 @@ export async function pollNobleForOrbiter(inputs: NobleTrackInputs, onUpdate?: (
   }
 
   return { ackFound, cctpFound, ackAt, cctpAt }
+}
+
+// New: Deposit poller (coin_received + ibc_transfer)
+export type NobleDepositTrackInputs = {
+  nobleRpc: string
+  startHeight: number
+  forwardingAddress: string
+  expectedAmountUusdc: string // e.g., "400uusdc"
+  namadaReceiver: string
+  timeoutMs?: number
+  intervalMs?: number
+}
+
+export type NobleDepositTrackResult = {
+  receivedFound: boolean
+  forwardFound: boolean
+  receivedAt?: number
+  forwardAt?: number
+}
+
+export async function pollNobleForDeposit(inputs: NobleDepositTrackInputs, onUpdate?: (u: { height: number; receivedFound?: boolean; forwardFound?: boolean }) => void): Promise<NobleDepositTrackResult> {
+  const timeoutMs = inputs.timeoutMs ?? 5 * 60 * 1000
+  const intervalMs = inputs.intervalMs ?? 5000
+  const deadline = Date.now() + timeoutMs
+  let nextHeight = inputs.startHeight
+
+  let receivedFound = false
+  let forwardFound = false
+  let receivedAt: number | undefined
+  let forwardAt: number | undefined
+
+  while (Date.now() < deadline && (!receivedFound || !forwardFound)) {
+    const latest = await fetchLatestHeight(inputs.nobleRpc)
+    try { console.info('[NobleDepositPoller] latest height', latest, 'nextHeight', nextHeight) } catch {}
+    while (nextHeight <= latest && (!receivedFound || !forwardFound)) {
+      onUpdate?.({ height: nextHeight, receivedFound, forwardFound })
+      const url = `${inputs.nobleRpc}/block_results?height=${nextHeight}`
+      try {
+        const res = await fetch(url)
+        const json = (await res.json()) as BlockResults
+        // 1) coin_received in txs_results
+        const txs = json?.result?.txs_results || []
+        for (const tx of txs) {
+          const events = tx?.events || []
+          for (const ev of events) {
+            if (!receivedFound && ev?.type === 'coin_received') {
+              const attrs = indexAttributes(ev.attributes)
+              const receiver = attrs['receiver']
+              const amount = attrs['amount']
+              if (receiver === inputs.forwardingAddress && amount === inputs.expectedAmountUusdc) {
+                receivedFound = true
+                receivedAt = nextHeight
+                try { console.info('[NobleDepositPoller] coin_received matched at', nextHeight) } catch {}
+                onUpdate?.({ height: nextHeight, receivedFound, forwardFound })
+              }
+            }
+          }
+        }
+        // 2) ibc_transfer in finalize_block_events
+        const endEvents = json?.result?.finalize_block_events || []
+        for (const ev of endEvents) {
+          if (!forwardFound && ev?.type === 'ibc_transfer') {
+            const attrs = indexAttributes(ev.attributes)
+            const sender = attrs['sender']
+            const receiver = attrs['receiver']
+            const denom = attrs['denom']
+            if (sender === inputs.forwardingAddress && receiver === inputs.namadaReceiver && denom === 'uusdc') {
+              forwardFound = true
+              forwardAt = nextHeight
+              try { console.info('[NobleDepositPoller] ibc_transfer matched at', nextHeight) } catch {}
+              onUpdate?.({ height: nextHeight, receivedFound, forwardFound })
+            }
+          }
+        }
+      } catch {
+        try { console.warn('[NobleDepositPoller] fetch failed for height', nextHeight) } catch {}
+      }
+      nextHeight++
+    }
+    if (receivedFound && forwardFound) break
+    await sleep(intervalMs)
+  }
+
+  return { receivedFound, forwardFound, receivedAt, forwardAt }
 }
 
 function indexAttributes(attrs?: { key: string; value: string }[]) {
