@@ -5,8 +5,7 @@ import { useToast } from '../ui/Toast'
 import { useNamadaKeychain } from '../../utils/namada'
 import { useAppState } from '../../state/AppState'
 import { useNamadaSdk } from '../../state/NamadaSdkProvider'
-import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewingKey } from '../../utils/shieldedSync'
-import { fetchBlockHeightByTimestamp } from '../../utils/indexer'
+import { useBalanceService } from '../../services/balanceService'
 
 type NavItem = { label: string; icon: string; key: string }
 
@@ -25,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
   const { sdk, rpc, isReady } = useNamadaSdk()
+  const { fetchBalances } = useBalanceService()
   const hasInProgressTx = state.transactions.some(tx => tx.status === 'submitting' || tx.status === 'pending')
   const [openConnect, setOpenConnect] = useState(false)
   const [isShieldedSyncing, setIsShieldedSyncing] = useState(false)
@@ -89,6 +89,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             },
           })
           showToast({ title: 'MetaMask', message: `Reconnected: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'success' })
+          try { void fetchBalances({ kinds: ['evmUsdc'], delayMs: 250 }) } catch {}
         } else {
           console.log('No existing MetaMask connection found')
         }
@@ -126,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             console.log('Namada account:', acct, 'Shielded paired:', shielded)
           }
           showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
-          try { window.dispatchEvent(new Event('shielded-sync:trigger')) } catch {}
+          try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 300 }) } catch {}
         } else {
           console.log('No existing Namada connection found')
         }
@@ -175,11 +176,13 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           },
         })
         showToast({ title: 'MetaMask', message: `Account: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'info' })
+        try { void fetchBalances({ kinds: ['evmUsdc'], delayMs: 200 }) } catch {}
       }
     }
 
     const handleChainChanged = () => {
       showToast({ title: 'Network Changed', message: 'MetaMask network changed', variant: 'info' })
+      try { void fetchBalances({ kinds: ['evmUsdc'], delayMs: 300 }) } catch {}
     }
 
     window.ethereum?.on?.('accountsChanged', handleAccountsChanged)
@@ -295,7 +298,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           })
         }
         showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })
-        try { window.dispatchEvent(new Event('shielded-sync:trigger')) } catch {}
+        try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
       } else {
         showToast({ title: 'Namada Keychain', message: 'Failed to connect', variant: 'error' })
       }
@@ -310,8 +313,17 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
     try {
       await disconnectNamada()
       dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'disconnected' } })
-      // keep addresses; user may prefer we do not clear namada address automatically
+      // Clear Namada addresses to prevent balance service from fetching for old addresses
+      dispatch({
+        type: 'SET_ADDRESSES',
+        payload: {
+          ...addressesRef.current,
+          namada: { transparent: '', shielded: '' },
+        },
+      })
       showToast({ title: 'Namada Keychain', message: 'Disconnected', variant: 'success' })
+      // Reset all Namada balances on disconnect
+      dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcTransparent: '--', namTransparent: '--', usdcShielded: '--', namShielded: '--' } } })
     } catch {}
   }
 

@@ -1,12 +1,12 @@
 import { ethers } from 'ethers'
 
-const USDC_ABI = [
+export const USDC_ABI = [
   'function approve(address spender, uint256 amount) external returns (bool)',
   'function allowance(address owner, address spender) external view returns (uint256)',
   'function balanceOf(address account) external view returns (uint256)'
 ]
 
-const TOKEN_MESSENGER_ABI = [
+export const TOKEN_MESSENGER_ABI = [
   'function depositForBurn(uint256 amount, uint32 destinationDomain, bytes32 mintRecipient, address burnToken) external returns (uint64 nonce)'
 ]
 

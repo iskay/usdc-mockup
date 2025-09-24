@@ -49,6 +49,7 @@ export type AppState = {
   txStatus: TxStatus
   transactions: Transaction[]
   isShieldedSyncing: boolean
+  isShieldedBalanceComputing?: boolean
   addresses: {
     ethereum: string
     base: string
@@ -72,6 +73,7 @@ type AppAction =
   | { type: 'SET_TX_STATUS'; payload: TxStatus }
   | { type: 'SET_ADDRESSES'; payload: AppState['addresses'] }
   | { type: 'SET_SHIELDED_SYNCING'; payload: boolean }
+  | { type: 'SET_SHIELDED_BALANCE_COMPUTING'; payload: boolean }
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'UPDATE_TRANSACTION'; payload: { id: string; changes: Partial<Transaction> } }
 
@@ -92,6 +94,7 @@ const initialState: AppState = {
   txStatus: 'idle',
   transactions: [],
   isShieldedSyncing: false,
+  isShieldedBalanceComputing: false,
   addresses: {
     ethereum: '',
     base: '',
@@ -130,6 +133,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, addresses: action.payload }
     case 'SET_SHIELDED_SYNCING':
       return { ...state, isShieldedSyncing: action.payload }
+    case 'SET_SHIELDED_BALANCE_COMPUTING':
+      return { ...state, isShieldedBalanceComputing: action.payload }
     case 'ADD_TRANSACTION':
       return { ...state, transactions: [action.payload, ...state.transactions] }
     case 'UPDATE_TRANSACTION':

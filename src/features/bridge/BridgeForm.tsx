@@ -12,6 +12,7 @@ import { PixelRow, pixelColors } from '../../components/layout/Pixels'
 import Spinner from '../../components/ui/Spinner'
 import { depositForBurnSepolia } from '../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../utils/forwarding'
+import { estimateDepositFeesUSD } from '../../utils/evmFee'
 import { fetchUsdcBalanceForSelectedChain } from '../../utils/evmBalance'
 import { getNamadaUSDCBalance, getNamadaNAMBalance } from '../../utils/namadaBalance'
 import { useNamadaSdk } from '../../state/NamadaSdkProvider'
@@ -20,6 +21,7 @@ import { ensureMaspReady, runShieldedSync, clearShieldedContext, type DatedViewi
 import { fetchShieldedBalances, formatMinDenom } from '../../utils/shieldedBalance'
 import { fetchLatestHeight as fetchNobleLatestHeight, pollNobleForDeposit } from '../../utils/noblePoller'
 import { fetchLatestHeight as fetchNamadaLatestHeight, pollNamadaForDeposit } from '../../utils/namadaPoller'
+import { useBalanceService } from '../../services/balanceService'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getAssetDecimalsByDisplay } from '../../utils/namadaBalance'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../utils/txShield'
 import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
@@ -40,6 +42,7 @@ const chains = [
 export const BridgeForm: React.FC = () => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
+  const { fetchBalances } = useBalanceService()
   const [activeTab, setActiveTab] = useState('deposit')
   const [chain, setChain] = useState('sepolia')
   const [depositAmount, setDepositAmount] = useState('')
@@ -106,6 +109,49 @@ export const BridgeForm: React.FC = () => {
 
   // Estimate USD fee for Send section using combined IBC unshielding estimate
   useEffect(() => {
+    const handle = window.setTimeout(async () => {
+      try {
+        console.info('[DepositFeeEst] run start', { chain, depositAmount, depositAddress })
+        if (chain !== 'sepolia') { console.info('[DepositFeeEst] skip: not sepolia'); setDepositFeeEst(null); return }
+        const tokenMessenger = (import.meta as any)?.env?.VITE_SEPOLIA_TOKEN_MESSENGER as string
+        const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+        if (!tokenMessenger || !usdcAddr) { console.warn('[DepositFeeEst] missing env', { tokenMessenger: !!tokenMessenger, usdcAddr: !!usdcAddr }); setDepositFeeEst(null); return }
+        // Ensure wallet is connected before estimating to allow signer-based estimation
+        if (!(window as any).ethereum) { console.warn('[DepositFeeEst] no ethereum provider'); setDepositFeeEst(null); return }
+        const accounts: string[] = await (window as any).ethereum.request?.({ method: 'eth_accounts' })
+        if (!accounts || accounts.length === 0) { console.warn('[DepositFeeEst] no accounts; connect metamask to enable estimates'); setDepositFeeEst(null); return }
+
+        // Check Noble forwarding registration for the current recipient address
+        let nobleRegistered = false
+        try {
+          const channelId = (import.meta as any)?.env?.VITE_NOBLE_TO_NAMADA_CHANNEL || 'channel-136'
+          const lcdUrl = (import.meta as any)?.env?.VITE_NOBLE_LCD_URL
+          if (depositAddress && lcdUrl) {
+            const url = `${lcdUrl}/noble/forwarding/v1/address/${channelId}/${depositAddress}/`
+            console.info('[DepositFeeEst] Noble exists check', { url })
+            const res = await fetch(url)
+            if (res.ok) {
+              const data = await res.json()
+              nobleRegistered = !!data?.exists
+              console.info('[DepositFeeEst] Noble exists result', data)
+            }
+          }
+        } catch (e) {
+          console.warn('[DepositFeeEst] Noble exists check failed', e)
+        }
+
+        const est = await estimateDepositFeesUSD({ amountUsdc: depositAmount || '0', usdcAddress: usdcAddr, tokenMessengerAddress: tokenMessenger })
+        const total = nobleRegistered ? (est.totalUsd - est.nobleRegUsd) : est.totalUsd
+        console.info('[DepositFeeEst] result', { ...est, nobleRegistered, displayedTotal: total })
+        setDepositFeeEst(`$${total.toFixed(4)}`)
+      } catch {
+        console.warn('[DepositFeeEst] estimation failed')
+        setDepositFeeEst(null)
+      }
+    }, 500)
+    return () => window.clearTimeout(handle)
+  }, [chain, depositAmount, depositAddress])
+  useEffect(() => {
     const run = async () => {
       try {
         if (!isReady || !sdk) return
@@ -142,44 +188,37 @@ export const BridgeForm: React.FC = () => {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
-  // Helpers: refresh shielded context and balances after a tx
-  const refreshShieldedAfterTx = async (chainId: string) => {
+
+  // Minimal trigger: on MetaMask connect update balances (evm + namada transparent)
+  useEffect(() => {
+    if (state.walletConnections.metamask === 'connected') {
+      void fetchBalances({ kinds: ['evmUsdc', 'namadaTransparentUsdc', 'namadaTransparentNam'], delayMs: 250 })
+    }
+  }, [state.walletConnections.metamask])
+
+  // Clear Namada-related local state when disconnecting
+  useEffect(() => {
+    if (state.walletConnections.namada === 'disconnected') {
+      setShieldedSyncProgress(null)
+      setUsdcShieldedMinDenom(null)
+      setSendShieldedSyncProgress(null)
+    }
+  }, [state.walletConnections.namada])
+  // Helpers: refresh shielded context and balances after a tx (delegate to balance service)
+  const refreshShieldedAfterTx = async (_chainId: string) => {
     try {
       setShieldedSyncProgress(0)
-      const available = await isNamadaAvailable()
-      if (!available) return
-      const allAccounts = (await getNamadaAccounts()) as any[]
-      const shieldedAccounts = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-      if (shieldedAccounts.length === 0) return
-      const vks = [] as { key: string; birthday: number }[]
-      for (const a of shieldedAccounts) {
-        let birthday = 0
-        if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
-          try { birthday = await fetchBlockHeightByTimestamp(a.timestamp) } catch { }
-        }
-        vks.push({ key: String(a.viewingKey), birthday })
-      }
-      const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
-      await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-      await runShieldedSync({
-        sdk: sdk as any,
-        viewingKeys: vks,
-        chainId,
-        maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
-        onProgress: (p) => setShieldedSyncProgress(Math.round(p * 100)),
+      await fetchBalances({
+        kinds: ['shieldedSync', 'namadaShieldedBalances'],
+        delayMs: 0,
+        force: true,
+        onProgress: (evt) => {
+          if (evt.step === 'shieldedSyncStarted') setShieldedSyncProgress(0)
+          if (evt.step === 'shieldedSyncProgress' && typeof evt.data === 'number') setShieldedSyncProgress(evt.data)
+          if (evt.step === 'shieldedSyncFinished') setShieldedSyncProgress(100)
+        },
       })
-      const [usdcAddr2, namAddr2] = await Promise.all([
-        getUSDCAddressFromRegistry(),
-        getNAMAddressFromRegistry(),
-      ])
-      const tokens2 = [usdcAddr2, namAddr2].filter((x): x is string => typeof x === 'string' && x.length > 0)
-      const firstVk = vks[0]?.key
-      if (firstVk && tokens2.length > 0) {
-        const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens2, chainId)
-        const map = new Map<string, string>(balances)
-        if (usdcAddr2) dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(map.get(usdcAddr2) || '0', 'USDC') } } })
-        if (namAddr2) dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(map.get(namAddr2) || '0', 'NAM') } } })
-      }
+      setShieldedSyncProgress(100)
     } finally {
       setTimeout(() => setShieldedSyncProgress(null), 1500)
     }
@@ -188,89 +227,23 @@ export const BridgeForm: React.FC = () => {
   // Reusable function: triggers the same logic as clicking the Shielded Sync button
   const triggerShieldedSync = async () => {
     try {
-      if (!isReady || !sdk || !rpc) {
-        showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
-        return
-      }
       setShieldedSyncProgress(0)
-      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: true })
-      const acct = await getDefaultAccount()
-      if (!acct) {
-        showToast({ title: 'Shielded Sync', message: 'No Namada account connected', variant: 'error' })
-        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-        setShieldedSyncProgress(null)
-        return
-      }
-      const available = await isNamadaAvailable()
-      if (!available) {
-        showToast({ title: 'Shielded Sync', message: 'Namada Keychain not available', variant: 'error' })
-        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-        setShieldedSyncProgress(null)
-        return
-      }
-      const allAccounts = (await getNamadaAccounts()) as any[]
-      const shielded = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-      const vks: DatedViewingKey[] = []
-      for (const a of shielded) {
-        let birthday = 0
-        if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
-          try {
-            birthday = await fetchBlockHeightByTimestamp(a.timestamp)
-          } catch { }
-        }
-        vks.push({ key: String(a.viewingKey), birthday })
-      }
-      if (vks.length === 0) {
-        showToast({ title: 'Shielded Sync', message: 'No viewing keys found. Ensure a shielded account exists and this site is connected in Keychain.', variant: 'warning' })
-        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-        setShieldedSyncProgress(null)
-        return
-      }
-      const logFull = ((import.meta as any)?.env?.VITE_DEBUG_LOG_FULL_VK as string | undefined) === 'true'
-      vks.forEach(({ key, birthday }) => {
-        const masked = `${key.slice(0, 12)}...${key.slice(-8)}`
-        const toLog = logFull ? key : masked
-        console.info('[Shielded Sync] Using viewing key:', toLog, 'birthday:', birthday)
+      await fetchBalances({
+        kinds: ['shieldedSync', 'namadaShieldedBalances'],
+        delayMs: 0,
+        force: true,
+        onProgress: (evt) => {
+          if (evt.step === 'shieldedSyncStarted') setShieldedSyncProgress(0)
+          if (evt.step === 'shieldedSyncProgress' && typeof evt.data === 'number') setShieldedSyncProgress(evt.data)
+          if (evt.step === 'shieldedSyncFinished') setShieldedSyncProgress(100)
+        },
       })
-      const chainId = await fetchChainIdFromRpc((sdk as any).url)
-      const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
-      await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-      await runShieldedSync({
-        sdk: sdk as any,
-        viewingKeys: vks,
-        chainId,
-        maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
-        onProgress: (p) => setShieldedSyncProgress(Math.round(p * 100)),
-      })
-      // Fetch shielded USDC and NAM for the first available viewing key
-      try {
-        const firstVk = vks[0]?.key
-        if (firstVk) {
-          const [usdcAddr, namAddr] = await Promise.all([
-            getUSDCAddressFromRegistry(),
-            getNAMAddressFromRegistry(),
-          ])
-          const tokens = [usdcAddr, namAddr].filter((x): x is string => typeof x === 'string' && x.length > 0)
-          const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens, chainId)
-          const map = new Map<string, string>(balances)
-          if (usdcAddr) {
-            const usdcMin = map.get(usdcAddr) || '0'
-            setUsdcShieldedMinDenom(usdcMin)
-            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(usdcMin, 'USDC') } } })
-          }
-          if (namAddr) {
-            const namMin = map.get(namAddr) || '0'
-            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(namMin, 'NAM') } } })
-          }
-        }
-      } catch { }
       showToast({ title: 'Shielded Sync', message: 'Completed', variant: 'success' })
       setShieldedSyncProgress(100)
     } catch (e: any) {
       console.error('[Shielded Sync] Error', e)
       showToast({ title: 'Shielded Sync', message: e?.message ?? 'Failed', variant: 'error' })
     } finally {
-      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
       setTimeout(() => setShieldedSyncProgress(null), 1500)
     }
   }
@@ -441,6 +414,7 @@ export const BridgeForm: React.FC = () => {
   const sendRunId = useRef(0)
   const currentDepositTxIdRef = useRef<string | null>(null)
   const currentSendTxIdRef = useRef<string | null>(null)
+  const [depositFeeEst, setDepositFeeEst] = useState<string | null>(null)
 
   // Persist Send form pending state across navigation by syncing with global transactions
   useEffect(() => {
@@ -637,6 +611,8 @@ export const BridgeForm: React.FC = () => {
               showToast({ title: 'Deposit', message: 'Received on Noble', variant: 'success' })
               setDepositTx((t) => ({ ...t, stage: 'Received on Noble' }))
               dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { stage: 'Received on Noble' } } })
+              // On Noble receipt, refresh Namada transparent balances
+              try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
               // Start Namada poller once Noble receipt is detected
               const namadaRpc = (import.meta as any)?.env?.VITE_NAMADA_RPC_URL as string
               if (namadaRpc) {
@@ -658,6 +634,8 @@ export const BridgeForm: React.FC = () => {
                         const chainId = await fetchChainIdFromRpc((sdk as any).url)
                         setDepositTx((t) => ({ ...t, status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId }))
                         dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId } } })
+                          // On Namada receipt, run shielded sync then refresh shielded balances
+                          try { void fetchBalances({ kinds: ['shieldedSync','namadaShieldedBalances'], delayMs: 500 }) } catch {}
                       }
                     })
                   } catch (e) {
@@ -1172,22 +1150,22 @@ export const BridgeForm: React.FC = () => {
     const run = async () => {
       try {
         if (state.walletConnections.namada !== 'connected') {
-          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--', namShielded: '--' } } })
+          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--' } } })
           return
         }
         const addr = state.addresses.namada.transparent
         if (!addr) {
-          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--', namShielded: '--' } } })
+          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--' } } })
           return
         }
         const res = await getNamadaNAMBalance(addr)
         if (!res) {
-          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--', namShielded: '--' } } })
+          dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--' } } })
           return
         }
-        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: res.formattedBalance, namShielded: '--' } } })
+        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: res.formattedBalance } } })
       } catch {
-        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--', namShielded: '--' } } })
+        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namTransparent: '--' } } })
       }
     }
     void run()
@@ -1411,14 +1389,14 @@ export const BridgeForm: React.FC = () => {
             <i className="fa-solid fa-gas-pump text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated fees</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">$--</span>
+          <span className="info-text font-semibold text-muted-fg">{depositFeeEst ?? '$--'}</span>
         </div>
         <div className="flex justify-between">
           <div className="flex gap-2 items-baseline">
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated deposit time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">3 - 5 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">2 - 3 minutes</span>
         </div>
       </div>
 
@@ -1575,94 +1553,27 @@ export const BridgeForm: React.FC = () => {
         />
         <div className="info-text ml-4 flex items-center gap-2">
           <span>Available: {state.balances.namada.usdcShielded} USDC</span>
-          {state.balances.namada.usdcShielded === '--' && state.walletConnections.namada === 'connected' && !state.isShieldedSyncing && (
+          {state.balances.namada.usdcShielded === '--' && state.walletConnections.namada === 'connected' && !state.isShieldedSyncing && !state.isShieldedBalanceComputing && (
             <button
               type="button"
               onClick={async () => {
                 try {
-                  if (!isReady || !sdk || !rpc) {
-                    showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
-                    return
-                  }
                   setSendShieldedSyncProgress(0)
-                  dispatch({ type: 'SET_SHIELDED_SYNCING', payload: true })
-                  const acct = await getDefaultAccount()
-                  if (!acct) {
-                    showToast({ title: 'Shielded Sync', message: 'No Namada account connected', variant: 'error' })
-                    dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                    setSendShieldedSyncProgress(null)
-                    return
-                  }
-                  const available = await isNamadaAvailable()
-                  if (!available) {
-                    showToast({ title: 'Shielded Sync', message: 'Namada Keychain not available', variant: 'error' })
-                    dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                    setSendShieldedSyncProgress(null)
-                    return
-                  }
-                  const allAccounts = (await getNamadaAccounts()) as any[]
-                  const shielded = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-                  const vks: DatedViewingKey[] = []
-                  for (const a of shielded) {
-                    let birthday = 0
-                    if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
-                      try {
-                        birthday = await fetchBlockHeightByTimestamp(a.timestamp)
-                      } catch { }
-                    }
-                    vks.push({ key: String(a.viewingKey), birthday })
-                  }
-                  if (vks.length === 0) {
-                    showToast({ title: 'Shielded Sync', message: 'No viewing keys found. Ensure a shielded account exists and this site is connected in Keychain.', variant: 'warning' })
-                    dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                    setSendShieldedSyncProgress(null)
-                    return
-                  }
-                  const logFull = ((import.meta as any)?.env?.VITE_DEBUG_LOG_FULL_VK as string | undefined) === 'true'
-                  vks.forEach(({ key, birthday }) => {
-                    const masked = `${key.slice(0, 12)}...${key.slice(-8)}`
-                    const toLog = logFull ? key : masked
-                    console.info('[Send Shielded Sync] Using viewing key:', toLog, 'birthday:', birthday)
+                  await fetchBalances({
+                    kinds: ['shieldedSync','namadaShieldedBalances'],
+                    delayMs: 0,
+                    force: true,
+                    onProgress: (evt) => {
+                      if (evt.step === 'shieldedSyncStarted') setSendShieldedSyncProgress(0)
+                      if (evt.step === 'shieldedSyncProgress' && typeof evt.data === 'number') setSendShieldedSyncProgress(evt.data)
+                      if (evt.step === 'shieldedSyncFinished') setSendShieldedSyncProgress(100)
+                    },
                   })
-                  const chainId = await fetchChainIdFromRpc((sdk as any).url)
-                  const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
-                  await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-                  await runShieldedSync({
-                    sdk: sdk as any,
-                    viewingKeys: vks,
-                    chainId,
-                    maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
-                    onProgress: (p) => setSendShieldedSyncProgress(Math.round(p * 100)),
-                  })
-                  // Fetch shielded USDC for the first available viewing key
-                  try {
-                    const firstVk = vks[0]?.key
-                    if (firstVk) {
-                      const [usdcAddr, namAddr] = await Promise.all([
-                        getUSDCAddressFromRegistry(),
-                        getNAMAddressFromRegistry(),
-                      ])
-                      const tokens = [usdcAddr, namAddr].filter((x): x is string => typeof x === 'string' && x.length > 0)
-                      const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens, chainId)
-                      const map = new Map<string, string>(balances)
-                      if (usdcAddr) {
-                        const usdcMin = map.get(usdcAddr) || '0'
-                        setUsdcShieldedMinDenom(usdcMin)
-                        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(usdcMin, 'USDC') } } })
-                      }
-                      if (namAddr) {
-                        const namMin = map.get(namAddr) || '0'
-                        dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(namMin, 'NAM') } } })
-                      }
-                    }
-                  } catch { }
                   showToast({ title: 'Shielded Sync', message: 'Completed', variant: 'success' })
-                  setSendShieldedSyncProgress(100)
+                  setTimeout(() => setSendShieldedSyncProgress(null), 1500)
                 } catch (e: any) {
                   console.error('[Send Shielded Sync] Error', e)
                   showToast({ title: 'Shielded Sync', message: e?.message ?? 'Failed', variant: 'error' })
-                } finally {
-                  dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
                   setTimeout(() => setSendShieldedSyncProgress(null), 1500)
                 }
               }}
@@ -1915,92 +1826,25 @@ export const BridgeForm: React.FC = () => {
                   variant="ghost"
                   size="xs"
                   leftIcon={<i className="fas fa-rotate text-sm"></i>}
-                  disabled={state.isShieldedSyncing}
+                  disabled={state.isShieldedSyncing || state.walletConnections.namada !== 'connected'}
                   onClick={async () => {
                     try {
-                      if (!isReady || !sdk || !rpc) {
-                        showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' })
-                        return
-                      }
                       setShieldedSyncProgress(0)
-                      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: true })
-                      const acct = await getDefaultAccount()
-                      if (!acct) {
-                        showToast({ title: 'Shielded Sync', message: 'No Namada account connected', variant: 'error' })
-                        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                        setShieldedSyncProgress(null)
-                        return
-                      }
-                      const available = await isNamadaAvailable()
-                      if (!available) {
-                        showToast({ title: 'Shielded Sync', message: 'Namada Keychain not available', variant: 'error' })
-                        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                        setShieldedSyncProgress(null)
-                        return
-                      }
-                      const allAccounts = (await getNamadaAccounts()) as any[]
-                      const shielded = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-                      const vks: DatedViewingKey[] = []
-                      for (const a of shielded) {
-                        let birthday = 0
-                        if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
-                          try {
-                            birthday = await fetchBlockHeightByTimestamp(a.timestamp)
-                          } catch { }
-                        }
-                        vks.push({ key: String(a.viewingKey), birthday })
-                      }
-                      if (vks.length === 0) {
-                        showToast({ title: 'Shielded Sync', message: 'No viewing keys found. Ensure a shielded account exists and this site is connected in Keychain.', variant: 'warning' })
-                        dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
-                        setShieldedSyncProgress(null)
-                        return
-                      }
-                      const logFull = ((import.meta as any)?.env?.VITE_DEBUG_LOG_FULL_VK as string | undefined) === 'true'
-                      vks.forEach(({ key, birthday }) => {
-                        const masked = `${key.slice(0, 12)}...${key.slice(-8)}`
-                        const toLog = logFull ? key : masked
-                        console.info('[Shielded Sync] Using viewing key:', toLog, 'birthday:', birthday)
+                      await fetchBalances({
+                        kinds: ['shieldedSync','namadaShieldedBalances'],
+                        delayMs: 0,
+                        force: true,
+                        onProgress: (evt) => {
+                          if (evt.step === 'shieldedSyncStarted') setShieldedSyncProgress(0)
+                          if (evt.step === 'shieldedSyncProgress' && typeof evt.data === 'number') setShieldedSyncProgress(evt.data)
+                          if (evt.step === 'shieldedSyncFinished') setShieldedSyncProgress(100)
+                        },
                       })
-                      const chainId = await fetchChainIdFromRpc((sdk as any).url)
-                      const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
-                      await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-                      await runShieldedSync({
-                        sdk: sdk as any,
-                        viewingKeys: vks,
-                        chainId,
-                        maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
-                        onProgress: (p) => setShieldedSyncProgress(Math.round(p * 100)),
-                      })
-                      // Fetch shielded USDC for the first available viewing key
-                      try {
-                        const firstVk = vks[0]?.key
-                        if (firstVk) {
-                          const [usdcAddr, namAddr] = await Promise.all([
-                            getUSDCAddressFromRegistry(),
-                            getNAMAddressFromRegistry(),
-                          ])
-                          const tokens = [usdcAddr, namAddr].filter((x): x is string => typeof x === 'string' && x.length > 0)
-                          const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens, chainId)
-                          const map = new Map<string, string>(balances)
-                          if (usdcAddr) {
-                            const usdcMin = map.get(usdcAddr) || '0'
-                            setUsdcShieldedMinDenom(usdcMin)
-                            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(usdcMin, 'USDC') } } })
-                          }
-                          if (namAddr) {
-                            const namMin = map.get(namAddr) || '0'
-                            dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(namMin, 'NAM') } } })
-                          }
-                        }
-                      } catch { }
                       showToast({ title: 'Shielded Sync', message: 'Completed', variant: 'success' })
-                      setShieldedSyncProgress(100)
+                      setTimeout(() => setShieldedSyncProgress(null), 1500)
                     } catch (e: any) {
                       console.error('[Shielded Sync] Error', e)
                       showToast({ title: 'Shielded Sync', message: e?.message ?? 'Failed', variant: 'error' })
-                    } finally {
-                      dispatch({ type: 'SET_SHIELDED_SYNCING', payload: false })
                       setTimeout(() => setShieldedSyncProgress(null), 1500)
                     }
                   }}
@@ -2360,6 +2204,7 @@ export const BridgeForm: React.FC = () => {
             <div className="flex gap-2 items-center">
               <img src="/usdc-logo.svg" alt="USDC" className="h-5 w-5" />
               <div className="leading-none tracking-wide font-semibold text-[#e7bc59]">{state.balances.namada.usdcShielded} USDC</div>
+              {state.isShieldedBalanceComputing && <Spinner size="sm" variant="accent" />}
             </div>
           </div>
 
@@ -2486,6 +2331,7 @@ export const BridgeForm: React.FC = () => {
             <div className="flex gap-2 items-center">
               <img src="/namada-logo.svg" alt="NAM" className="h-5 w-5" />
               <div className="leading-none tracking-wide font-semibold text-[#e7bc59]">{state.balances.namada.namShielded} NAM</div>
+              {state.isShieldedBalanceComputing && <Spinner size="sm" variant="accent" />}
             </div>
           </div>
 
