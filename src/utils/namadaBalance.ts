@@ -34,7 +34,14 @@ export async function fetchNamadaAccountBalances(accountAddress: string): Promis
     const apiUrl = `${getNamadaIndexerUrl()}/api/v1/account/${accountAddress}`
     const res = await fetch(apiUrl)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const balances = (await res.json()) as { tokenAddress: string; minDenomAmount: string }[]
+    const rawBalances = (await res.json()) as any[]
+    
+    // Handle both old and new API response formats
+    const balances = rawBalances.map((b) => ({
+      tokenAddress: typeof b.tokenAddress === 'string' ? b.tokenAddress : b.tokenAddress?.address || '',
+      minDenomAmount: b.minDenomAmount
+    }))
+    
     return balances
   } catch {
     return null
@@ -51,7 +58,7 @@ export async function getNamadaUSDCBalance(accountAddress: string): Promise<Nama
 
     const usdc = balances.find((b) => b.tokenAddress === usdcAddress)
     if (!usdc) {
-      return { balance: '0', formattedBalance: '0.00', tokenAddress: usdcAddress, accountAddress }
+      return { balance: '0', formattedBalance: '0.000000', tokenAddress: usdcAddress, accountAddress }
     }
 
     // Determine decimals from asset list; default to 6
@@ -62,7 +69,7 @@ export async function getNamadaUSDCBalance(accountAddress: string): Promise<Nama
 
     const minDenom = BigInt(usdc.minDenomAmount)
     const formattedRaw = Number(minDenom) / Math.pow(10, decimals)
-    const formatted = (formattedRaw === 0 ? 0 : formattedRaw).toFixed(2)
+    const formatted = (formattedRaw === 0 ? 0 : formattedRaw).toFixed(6)
     return { balance: usdc.minDenomAmount, formattedBalance: formatted, tokenAddress: usdcAddress, accountAddress }
   } catch {
     return null
@@ -113,7 +120,7 @@ export async function getNamadaNAMBalance(accountAddress: string): Promise<Namad
     }
 
     if (!nam) {
-      return { balance: '0', formattedBalance: '0.00', tokenAddress: namAddress ?? null, accountAddress }
+      return { balance: '0', formattedBalance: '0.000000', tokenAddress: namAddress ?? null, accountAddress }
     }
 
     // Determine decimals from asset list; default to 6
@@ -124,7 +131,7 @@ export async function getNamadaNAMBalance(accountAddress: string): Promise<Namad
 
     const minDenom = BigInt(nam.minDenomAmount)
     const formattedRaw = Number(minDenom) / Math.pow(10, decimals)
-    const formatted = (formattedRaw === 0 ? 0 : formattedRaw).toFixed(2)
+    const formatted = (formattedRaw === 0 ? 0 : formattedRaw).toFixed(6)
     return { balance: nam.minDenomAmount, formattedBalance: formatted, tokenAddress: nam.tokenAddress ?? namAddress ?? null, accountAddress }
   } catch {
     return null

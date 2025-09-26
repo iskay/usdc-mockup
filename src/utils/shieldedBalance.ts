@@ -27,9 +27,9 @@ export function formatMinDenom(amountMinDenom: string, display: string = 'USDC')
   try {
     const decimals = getAssetDecimalsByDisplay(display, 6)
     const n = Number(BigInt(amountMinDenom)) / Math.pow(10, decimals)
-    return (n === 0 ? 0 : n).toFixed(2)
+    return (n === 0 ? 0 : n).toFixed(6)
   } catch {
-    return '0.00'
+    return '0.000000'
   }
 }
 
