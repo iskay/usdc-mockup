@@ -12,6 +12,7 @@ export type SelectMenuProps<T extends string | number = string> = {
   options: Array<SelectMenuOption<T>>
   placeholder?: string
   className?: string
+  disabled?: boolean
 }
 
 export function SelectMenu<T extends string | number = string>({
@@ -20,6 +21,7 @@ export function SelectMenu<T extends string | number = string>({
   options,
   placeholder,
   className,
+  disabled = false,
 }: SelectMenuProps<T>) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
@@ -47,8 +49,9 @@ export function SelectMenu<T extends string | number = string>({
     <div ref={rootRef} className={`relative ${className ?? ''}`}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="input-style py-3 pr-9 pl-3 text-left"
+        onClick={() => !disabled && setOpen((v) => !v)}
+        disabled={disabled}
+        className={`input-style ${disabled ? 'input-style-disabled' : ''} py-3 pr-9 pl-3 text-left`}
       >
         <span className="inline-flex items-center gap-2">
           {selected?.iconUrl ? (

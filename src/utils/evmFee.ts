@@ -44,13 +44,14 @@ export async function estimateDepositFeesUSD(params: {
     }
   }
 
-  // 1) Approve estimate (max approve for amount)
+  // 1) Approve estimate (large approval amount - matches production behavior)
   let approveGas = 0n
   try {
     if (signer && wallet) {
       const usdc = new ethers.Contract(params.usdcAddress, USDC_ABI, signer)
-      const amountWei = ethers.parseUnits(params.amountUsdc || '0', 6)
-      const approveTx = await usdc.approve.populateTransaction(params.tokenMessengerAddress, amountWei)
+      // Use large approval amount (1M USDC) to match the actual approval logic
+      const largeApprovalAmount = ethers.parseUnits("1000000", 6) // 1M USDC
+      const approveTx = await usdc.approve.populateTransaction(params.tokenMessengerAddress, largeApprovalAmount)
       const txForEst: any = { ...approveTx, from: wallet }
       if (gasPrice > 0n) {
         // Prefer legacy gasPrice for estimate if EIP-1559 fields are absent
@@ -59,7 +60,7 @@ export async function estimateDepositFeesUSD(params: {
         }
       }
       approveGas = await provider.estimateGas(txForEst)
-      try { console.info('[FeeEst] approveGas:', approveGas.toString()) } catch {}
+      try { console.info('[FeeEst] approveGas (large approval):', approveGas.toString()) } catch {}
     } else {
       try { console.info('[FeeEst] skipping approve gas estimate (no signer)') } catch {}
     }

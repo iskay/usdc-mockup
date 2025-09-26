@@ -90,6 +90,10 @@
   @apply w-full rounded-xl border border-border-muted bg-input py-4 pr-3 leading-none tracking-wide font-semibold placeholder:text-muted-fg outline-none focus:ring-2 focus:border-card;
 }
 
+@utility input-style-disabled {
+  @apply bg-base border-border-muted/30 text-muted-fg/60 cursor-not-allowed;
+}
+
 @utility info-text {
   @apply mt-2 text-muted-fg text-[0.8em] font-medium;
 }

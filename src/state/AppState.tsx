@@ -38,6 +38,8 @@ export type Transaction = {
   nobleAckFound?: boolean
   nobleCctpFound?: boolean
   namadaChainId?: string
+  // Optional error message when status is 'error'
+  errorMessage?: string
   status: TransactionPhase
   createdAt: number
   updatedAt: number
@@ -48,6 +50,7 @@ export type AppState = {
   walletConnections: WalletConnections
   txStatus: TxStatus
   transactions: Transaction[]
+  transactionsById?: Record<string, Transaction>
   isShieldedSyncing: boolean
   isShieldedBalanceComputing?: boolean
   addresses: {
@@ -76,6 +79,12 @@ type AppAction =
   | { type: 'SET_SHIELDED_BALANCE_COMPUTING'; payload: boolean }
   | { type: 'ADD_TRANSACTION'; payload: Transaction }
   | { type: 'UPDATE_TRANSACTION'; payload: { id: string; changes: Partial<Transaction> } }
+  | { type: 'UPSERT_TRANSACTION'; payload: Transaction }
+  | { type: 'REMOVE_TRANSACTION'; payload: { id: string } }
+  | { type: 'SET_TRANSACTION_STAGE'; payload: { id: string; stage: string } }
+  | { type: 'SET_TRANSACTION_STATUS'; payload: { id: string; status: TransactionPhase } }
+  | { type: 'LOAD_TRANSACTIONS_FROM_STORAGE'; payload: Transaction[] }
+  | { type: 'CLEAR_COMPLETED_TRANSACTIONS'; payload?: { olderThanMs?: number } }
 
 const initialState: AppState = {
   balances: {
@@ -93,6 +102,7 @@ const initialState: AppState = {
   },
   txStatus: 'idle',
   transactions: [],
+  transactionsById: {},
   isShieldedSyncing: false,
   isShieldedBalanceComputing: false,
   addresses: {
@@ -136,14 +146,77 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'SET_SHIELDED_BALANCE_COMPUTING':
       return { ...state, isShieldedBalanceComputing: action.payload }
     case 'ADD_TRANSACTION':
-      return { ...state, transactions: [action.payload, ...state.transactions] }
+      return {
+        ...state,
+        transactions: [action.payload, ...state.transactions],
+        transactionsById: { ...(state.transactionsById || {}), [action.payload.id]: action.payload },
+      }
     case 'UPDATE_TRANSACTION':
       return {
         ...state,
         transactions: state.transactions.map((tx) =>
           tx.id === action.payload.id ? { ...tx, ...action.payload.changes, updatedAt: Date.now() } : tx
         ),
+        transactionsById: {
+          ...(state.transactionsById || {}),
+          [action.payload.id]: {
+            ...((state.transactionsById || {})[action.payload.id] || ({} as any)),
+            ...action.payload.changes,
+            id: action.payload.id,
+            updatedAt: Date.now(),
+          } as Transaction,
+        },
       }
+    case 'UPSERT_TRANSACTION': {
+      const exists = (state.transactionsById || {})[action.payload.id]
+      const updated = { ...action.payload, updatedAt: Date.now() }
+      return {
+        ...state,
+        transactions: exists ? state.transactions.map((t) => (t.id === updated.id ? updated : t)) : [updated, ...state.transactions],
+        transactionsById: { ...(state.transactionsById || {}), [updated.id]: updated },
+      }
+    }
+    case 'REMOVE_TRANSACTION': {
+      const { id } = action.payload
+      const nextArr = state.transactions.filter((t) => t.id !== id)
+      const nextMap = { ...(state.transactionsById || {}) }
+      delete (nextMap as any)[id]
+      return { ...state, transactions: nextArr, transactionsById: nextMap }
+    }
+    case 'SET_TRANSACTION_STAGE': {
+      const { id, stage } = action.payload
+      return {
+        ...state,
+        transactions: state.transactions.map((t) => (t.id === id ? { ...t, stage, updatedAt: Date.now() } : t)),
+        transactionsById: {
+          ...(state.transactionsById || {}),
+          [id]: { ...((state.transactionsById || {})[id] as any), id, stage, updatedAt: Date.now() },
+        },
+      }
+    }
+    case 'SET_TRANSACTION_STATUS': {
+      const { id, status } = action.payload
+      return {
+        ...state,
+        transactions: state.transactions.map((t) => (t.id === id ? { ...t, status, updatedAt: Date.now() } : t)),
+        transactionsById: {
+          ...(state.transactionsById || {}),
+          [id]: { ...((state.transactionsById || {})[id] as any), id, status, updatedAt: Date.now() },
+        },
+      }
+    }
+    case 'LOAD_TRANSACTIONS_FROM_STORAGE': {
+      const arr = action.payload || []
+      const map = Object.fromEntries(arr.map((t) => [t.id, t])) as Record<string, Transaction>
+      return { ...state, transactions: arr, transactionsById: map }
+    }
+    case 'CLEAR_COMPLETED_TRANSACTIONS': {
+      const olderThan = action.payload?.olderThanMs ?? 7 * 24 * 60 * 60 * 1000
+      const now = Date.now()
+      const arr = state.transactions.filter((t) => !(t.status === 'success' && now - t.updatedAt > olderThan))
+      const map = Object.fromEntries(arr.map((t) => [t.id, t])) as Record<string, Transaction>
+      return { ...state, transactions: arr, transactionsById: map }
+    }
     default:
       return state
   }

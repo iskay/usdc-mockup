@@ -28,7 +28,7 @@ import { buildSignBroadcastUnshieldingIbc } from '../../utils/txUnshieldIbc'
 import { buildOrbiterCctpMemo, evmHex20ToBase64_32 } from '../../utils/ibcMemo'
 import { fetchLatestHeight, pollNobleForOrbiter } from '../../utils/noblePoller'
 import { pollSepoliaUsdcMint } from '../../utils/evmPoller'
-import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceTable, fetchGasPriceForTokenAddress, fetchGasEstimateIbcUnshieldingTransfer } from '../../utils/indexer'
+import { fetchBlockHeightByTimestamp, fetchGasEstimateForKinds, fetchGasPriceForTokenAddress, fetchGasEstimateIbcUnshieldingTransfer } from '../../utils/indexer'
 import { type TxProps } from '@namada/sdk-multicore'
 
 const chains = [
@@ -56,6 +56,8 @@ export const BridgeForm: React.FC = () => {
   const [isAutoShieldedSyncing, setIsAutoShieldedSyncing] = useState(false)
   const [isShielding, setIsShielding] = useState(false)
   const [sendFeeEst, setSendFeeEst] = useState<string | null>(null)
+  const [shieldFeeUsdc, setShieldFeeUsdc] = useState<string | null>(null)
+  const [shieldFeeNam, setShieldFeeNam] = useState<string | null>(null)
   const [sendShieldedSyncProgress, setSendShieldedSyncProgress] = useState<number | null>(null)
   const [showMoreDropdown, setShowMoreDropdown] = useState(false)
   const [balanceRefreshCountdown, setBalanceRefreshCountdown] = useState<number | null>(null)
@@ -83,15 +85,12 @@ export const BridgeForm: React.FC = () => {
       selectedGasToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
     }
 
-    // Fetch gas estimate and price
+    // Fetch gas estimate
     try {
-      const [estimate, priceTable] = await Promise.all([
-        fetchGasEstimateForKinds(txKinds),
-        fetchGasPriceTable().catch(() => []),
-      ])
-      const priceEntry = priceTable.find((p) => p.token === selectedGasToken)
+      const estimate = await fetchGasEstimateForKinds(txKinds)
       const gasLimit = new BigNumber(estimate?.avg ?? fallbackGasLimit)
-      const gasPriceInMinDenom = new BigNumber(priceEntry?.gasPrice ?? '0.000001')
+      // Use fallback gas price since we removed the gas price table lookup
+      const gasPriceInMinDenom = new BigNumber('0.000001')
       return {
         gasToken: selectedGasToken,
         gasLimit,
@@ -177,6 +176,36 @@ export const BridgeForm: React.FC = () => {
     run()
     // Re-estimate when SDK readiness changes or when user changes amount/destination (optional minimal triggers)
   }, [isReady, sdk, sendAmount, sendAddress])
+
+  // Estimate Shielding fees (USDC and NAM), shown near Shield Now buttons
+  useEffect(() => {
+    const run = async () => {
+      try {
+        if (!isReady || !sdk) { setShieldFeeUsdc(null); setShieldFeeNam(null); return }
+        const usdcToken = await getUSDCAddressFromRegistry()
+        const namAddr = await getNAMAddressFromRegistry()
+        const gasTokenCandidate = usdcToken || namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
+
+        // Determine if reveal is needed to include in gas estimate
+        const transparent = state.addresses.namada.transparent
+        const publicKey = transparent ? (await (sdk as any).rpc.queryPublicKey(transparent)) || '' : ''
+        const baseKinds = ['ShieldingTransfer']
+        const txKinds = publicKey ? baseKinds : ['RevealPk', ...baseKinds]
+        const estimate = await fetchGasEstimateForKinds(txKinds)
+        const gas = await estimateGasForToken(gasTokenCandidate, txKinds, String(estimate.avg || 50000))
+
+        const feeInMinDenom = new BigNumber(gas.gasLimit).multipliedBy(gas.gasPriceInMinDenom)
+        // USDC: show in $; NAM: show token amount
+        const isUsdcGas = gas.gasToken === usdcToken
+        setShieldFeeUsdc(isUsdcGas ? `$${feeInMinDenom.toFixed(4)}` : null)
+        setShieldFeeNam(!isUsdcGas ? `${feeInMinDenom.toFixed(6)} NAM` : null)
+      } catch {
+        setShieldFeeUsdc(null)
+        setShieldFeeNam(null)
+      }
+    }
+    run()
+  }, [isReady, sdk, state.addresses.namada.transparent])
 
   // Handle clicking outside the more dropdown to close it
   useEffect(() => {
@@ -369,6 +398,14 @@ export const BridgeForm: React.FC = () => {
           }
         })
       })
+
+      // Centralize shield tracking in service (Phase 1: create success record immediately)
+      try {
+        const { createTxService } = await import('../../services/txService')
+        const svc = createTxService(dispatch)
+        const txId = `shield_${Date.now()}`
+        svc.trackShield({ txId, amount: amountInBase.toString(), tokenSymbol: (display.toUpperCase() as any), namadaHash: hash })
+      } catch {}
       
       // Delay then refresh with countdown
       setBalanceRefreshCountdown(10)
@@ -399,68 +436,42 @@ export const BridgeForm: React.FC = () => {
   }
 
 
-  type TxStatus = 'idle' | 'submitting' | 'pending' | 'success'
-  type TxState = {
-    status: TxStatus
-    hash?: string
-    namadaHash?: string
-    sepoliaHash?: string
-    stage?: string
-    namadaChainId?: string
-  }
-  const [depositTx, setDepositTx] = useState<TxState>({ status: 'idle' })
-  const [sendTx, setSendTx] = useState<TxState>({ status: 'idle' })
+  // Remove local tx state: derive deposit/send views directly from global transactions
   const depositRunId = useRef(0)
   const sendRunId = useRef(0)
   const currentDepositTxIdRef = useRef<string | null>(null)
   const currentSendTxIdRef = useRef<string | null>(null)
   const [depositFeeEst, setDepositFeeEst] = useState<string | null>(null)
 
-  // Persist Send form pending state across navigation by syncing with global transactions
+  // Derived views from global transactions
+  const inProgressDeposits = state.transactions.filter((t) => t.kind === 'deposit' && t.status !== 'success' && t.status !== 'error')
+  const latestDepositTx = inProgressDeposits[0]
+  const inProgressSends = state.transactions.filter((t) => t.kind === 'send' && t.status !== 'success' && t.status !== 'error')
+  const latestSendTx = inProgressSends[0]
+
+  // Initialize send form inputs from latest pending send tx (keep UX), no local status kept
   useEffect(() => {
     try {
-      // Initialize from most recent pending send tx if no current id
-      if (!currentSendTxIdRef.current) {
-        const pending = state.transactions.find((t) => t.kind === 'send' && t.status === 'pending')
-        if (pending) {
-          currentSendTxIdRef.current = pending.id
-          if (pending.amount) setSendAmount(pending.amount)
-          if (pending.destination) setSendAddress(pending.destination)
-          setSendTx((t) => ({
-            ...t,
-            status: pending.stage === 'Minted on Sepolia' ? 'success' : 'pending',
-            stage: pending.stage,
-            namadaHash: pending.namadaHash,
-            sepoliaHash: pending.sepoliaHash,
-            namadaChainId: pending.namadaChainId,
-          }))
-        }
-      } else {
-        const tx = state.transactions.find((t) => t.id === currentSendTxIdRef.current)
-        if (tx) {
-          setSendTx((t) => ({
-            ...t,
-            status: tx.stage === 'Minted on Sepolia' ? 'success' : 'pending',
-            stage: tx.stage,
-            namadaHash: tx.namadaHash,
-            sepoliaHash: tx.sepoliaHash,
-            namadaChainId: tx.namadaChainId,
-          }))
-        }
+      if (latestSendTx) {
+        if (!currentSendTxIdRef.current) currentSendTxIdRef.current = latestSendTx.id
+        if (latestSendTx.amount) setSendAmount(latestSendTx.amount)
+        if (latestSendTx.destination) setSendAddress(latestSendTx.destination)
       }
     } catch {}
-  }, [state.transactions])
+  }, [state.transactions, latestSendTx])
 
   const generateHash = () => `0x${Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')}`
+
+  // No local deposit status; inputs stay, status is derived from global tx list
 
   const startDepositSimulation = () => {
     const hash = generateHash()
     const amountNow = depositAmount
     const toNow = depositAddress
     const myRun = ++depositRunId.current
-    setDepositTx({ status: 'submitting', hash })
+    // local tx removed
     const txId = `dep_${Date.now()}`
     dispatch({
       type: 'ADD_TRANSACTION',
@@ -479,16 +490,12 @@ export const BridgeForm: React.FC = () => {
     })
     showToast({ title: 'Deposit', message: 'Submitting transaction…', variant: 'info' })
     window.setTimeout(() => {
-      if (depositRunId.current === myRun) {
-        setDepositTx((t) => ({ ...t, status: 'pending' }))
-      }
+      // local tx removed
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'pending' } } })
       showToast({ title: 'Deposit', message: 'Pending confirmation…', variant: 'warning' })
     }, 5000)
     window.setTimeout(() => {
-      if (depositRunId.current === myRun) {
-        setDepositTx((t) => ({ ...t, status: 'success' }))
-      }
+      // local tx removed
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success' } } })
       showToast({ title: 'Deposit', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0, 6) + '…' + toNow.slice(-4) : 'Namada'}`, variant: 'success' })
     }, 30000)
@@ -506,7 +513,7 @@ export const BridgeForm: React.FC = () => {
       const validation = validateForm(amountNow, getAvailableBalance(chain), toNow)
       if (!validation.isValid) return
 
-      setDepositTx({ status: 'submitting' })
+      // local tx removed
       const txId = currentDepositTxIdRef.current || `dep_${Date.now()}`
       if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
       dispatch({
@@ -573,7 +580,7 @@ export const BridgeForm: React.FC = () => {
         destinationDomain,
       })
 
-      setDepositTx({ status: 'pending', hash: txHash, sepoliaHash: txHash, stage: 'Burned on Sepolia' })
+      // local tx removed
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'pending', hash: txHash } } })
       showToast({ title: 'Deposit', message: 'Pending confirmation…', variant: 'warning' })
 
@@ -591,81 +598,31 @@ export const BridgeForm: React.FC = () => {
         console.warn('Tracker notify failed:', e?.message || e)
       }
 
-      // Start Noble deposit polling
+      // Start centralized tracking via TxService (keeps UI dual-write for now)
       try {
-        const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
-        if (!nobleRpc) throw new Error('VITE_NOBLE_RPC not set')
-        const startHeight = (await fetchNobleLatestHeight(nobleRpc)) + 1
-        const expectedAmountUusdc = `${Math.round(Number(amountNow) * 1e6)}uusdc`
-        const namadaReceiver = toNow
-        console.log('[Deposit Poller] Starting Noble poll', { nobleRpc, startHeight, forwardingAddress, expectedAmountUusdc, namadaReceiver })
-        void pollNobleForDeposit({
-          nobleRpc,
-          startHeight,
-          forwardingAddress,
-          expectedAmountUusdc,
-          namadaReceiver,
-        }, (u) => {
-          try {
-            if (u.receivedFound) {
-              showToast({ title: 'Deposit', message: 'Received on Noble', variant: 'success' })
-              setDepositTx((t) => ({ ...t, stage: 'Received on Noble' }))
-              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { stage: 'Received on Noble' } } })
-              // On Noble receipt, refresh Namada transparent balances
-              try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
-              // Start Namada poller once Noble receipt is detected
-              const namadaRpc = (import.meta as any)?.env?.VITE_NAMADA_RPC_URL as string
-              if (namadaRpc) {
-                void (async () => {
-                  try {
-                    const latestN = await fetchNamadaLatestHeight(namadaRpc)
-                    const nStart = Math.max(1, latestN - 3) // small safety window
-                    console.log('[Deposit Poller] Starting Namada poll', { namadaRpc, latestN, nStart, forwardingAddress, namadaReceiver })
-                    await pollNamadaForDeposit({
-                      namadaRpc,
-                      startHeight: nStart,
-                      forwardingAddress,
-                      namadaReceiver,
-                      denom: 'uusdc',
-                    }, async (nu) => {
-                      if (nu.ackFound) {
-                        showToast({ title: 'Deposit', message: 'Received on Namada', variant: 'success' })
-                        // Get chain ID for explorer link
-                        const chainId = await fetchChainIdFromRpc((sdk as any).url)
-                        setDepositTx((t) => ({ ...t, status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId }))
-                        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success', namadaHash: nu.namadaTxHash, stage: 'Received on Namada', namadaChainId: chainId } } })
-                          // On Namada receipt, run shielded sync then refresh shielded balances
-                          try { void fetchBalances({ kinds: ['shieldedSync','namadaShieldedBalances'], delayMs: 500 }) } catch {}
-                      }
-                    })
-                  } catch (e) {
-                    console.warn('[Deposit Poller] Namada poll start failed', e)
-                  }
-                })()
-              } else {
-                console.warn('[Deposit Poller] VITE_NAMADA_RPC_URL not set; Namada poller not started')
-              }
-            }
-            if (u.forwardFound) {
-              showToast({ title: 'Deposit', message: 'Forwarding to Namada', variant: 'success' })
-              setDepositTx((t) => ({ ...t, stage: 'Forwarding to Namada' }))
-              dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { stage: 'Forwarding to Namada' } } })
-            }
-          } catch {}
-        })
+        const { createTxService } = await import('../../services/txService')
+        const svc = createTxService(dispatch)
+        void svc.trackDeposit({ txId, amountUsdc: amountNow, forwardingAddress, namadaReceiver: toNow, sepoliaHash: txHash })
       } catch (e) {
-        console.warn('[Deposit Poller] Noble poll start failed', e)
+        console.warn('[TxService] trackDeposit start failed', e)
       }
     } catch (err: any) {
-      setDepositTx({ status: 'idle' })
+      try {
+        const txId = currentDepositTxIdRef.current
+        if (txId) {
+          dispatch({
+            type: 'UPDATE_TRANSACTION',
+            payload: { id: txId, changes: { status: 'error', errorMessage: err?.message ?? 'Sepolia depositForBurn failed' } },
+          })
+        }
+      } catch {}
       showToast({ title: 'Deposit Failed', message: err?.message ?? 'Transaction failed', variant: 'error' })
     }
   }
 
   const resetDeposit = () => {
     depositRunId.current++
-      setDepositTx({ status: 'idle' })
-      currentDepositTxIdRef.current = null
+    currentDepositTxIdRef.current = null
     setDepositAmount('')
     setDepositAddress('')
   }
@@ -675,7 +632,7 @@ export const BridgeForm: React.FC = () => {
     const amountNow = sendAmount
     const toNow = sendAddress
     const myRun = ++sendRunId.current
-    setSendTx({ status: 'submitting', hash })
+    // local tx removed
     const txId = `send_${Date.now()}`
     dispatch({
       type: 'ADD_TRANSACTION',
@@ -695,14 +652,14 @@ export const BridgeForm: React.FC = () => {
     showToast({ title: 'Send', message: 'Submitting transaction…', variant: 'info' })
     window.setTimeout(() => {
       if (sendRunId.current === myRun) {
-        setSendTx((t) => ({ ...t, status: 'pending' }))
+        // local tx removed
       }
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'pending' } } })
       showToast({ title: 'Send', message: 'Pending confirmation…', variant: 'warning' })
     }, 5000)
     window.setTimeout(() => {
       if (sendRunId.current === myRun) {
-        setSendTx((t) => ({ ...t, status: 'success' }))
+        // local tx removed
       }
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'success' } } })
       showToast({ title: 'Send', message: `Success • ${amountNow} USDC to ${toNow ? toNow.slice(0, 6) + '…' + toNow.slice(-4) : chains.find(c => c.value === chain)?.label}`, variant: 'success' })
@@ -800,7 +757,7 @@ export const BridgeForm: React.FC = () => {
         return
       }
 
-      setSendTx({ status: 'submitting' })
+      // local tx removed
 
       // Optional refund target
       let refundTarget: string | undefined
@@ -835,7 +792,7 @@ export const BridgeForm: React.FC = () => {
           }
           const msg = map[phase]
           if (msg) showToast({ title: 'Send', message: msg, variant: 'info' })
-          if (msg) setSendTx((t) => ({ ...t, stage: msg }))
+          // local tx removed
           if (msg) {
             // Reflect stage globally pre-submission with a stable id
             if (!currentSendTxIdRef.current) {
@@ -863,7 +820,7 @@ export const BridgeForm: React.FC = () => {
       )
 
       const ibcHash = (result.ibc.response as any)?.hash
-      setSendTx({ status: 'success', hash: ibcHash, namadaHash: ibcHash, stage: 'Submitted to Namada', namadaChainId: chainId })
+      // local tx removed
       // Merge into the same global tx id created earlier or create if missing
       const txId = currentSendTxIdRef.current || `send_${Date.now()}`
       if (!currentSendTxIdRef.current) {
@@ -931,6 +888,23 @@ export const BridgeForm: React.FC = () => {
         const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
         const sepoliaRpc = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
         const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+        // Notify centralized tx service (Phase 1: stage only; worker still drives updates)
+        try {
+          const { createTxService } = await import('../../services/txService')
+          const svc = createTxService(dispatch)
+          svc.trackSend({
+            txId,
+            stage: 'Submitted to Namada',
+            memoJson: memo,
+            receiver,
+            amountMinDenom: amountInBase.toString(),
+            destinationCallerB64,
+            mintRecipientB64,
+            channelId,
+            sepoliaRecipient: sendAddress,
+            sepoliaAmountMinDenom: amountInBase.toString(),
+          })
+        } catch {}
         const worker = new Worker(new URL('../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
         worker.onmessage = (ev: MessageEvent) => {
           const data = ev.data as any
@@ -940,12 +914,12 @@ export const BridgeForm: React.FC = () => {
             if (typeof data.data.nobleAckFound === 'boolean') changes.nobleAckFound = data.data.nobleAckFound
             if (typeof data.data.nobleCctpFound === 'boolean') changes.nobleCctpFound = data.data.nobleCctpFound
             if (Object.keys(changes).length) {
-              setSendTx((t) => ({ ...t, ...changes }))
+              // local tx removed
               dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes } })
             }
           } else if (data.type === 'complete' && data.id === txId) {
             if (data.data?.sepoliaHash) {
-              setSendTx((t) => ({ ...t, sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia' }))
+              // local tx removed
               dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia', status: 'success' } } })
             }
             worker.terminate()
@@ -987,14 +961,14 @@ export const BridgeForm: React.FC = () => {
     } catch (e: any) {
       console.error('[Send Orbiter] Error', e)
       showToast({ title: 'Send', message: e?.message ?? 'Failed', variant: 'error' })
-      setSendTx({ status: 'idle' })
+      // local tx removed
       try { console.groupEnd() } catch {}
     }
   }
 
   const resetSend = () => {
     sendRunId.current++
-    setSendTx({ status: 'idle' })
+    // local tx removed
     setSendAmount('')
     setSendAddress('')
   }
@@ -1172,81 +1146,6 @@ export const BridgeForm: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.walletConnections.namada, state.addresses.namada.transparent])
 
-  // Auto-refresh Namada shielded balances every 30s (perform shielded sync first) - DISABLED
-  // useEffect(() => {
-  //   let timer: number | null = null
-  //   if (!isReady || !sdk) return
-  //   if (state.walletConnections.namada !== 'connected') return
-
-  //   const tick = async () => {
-  //     if (shieldedSyncInProgressRef.current) return
-  //     if (isShieldedSyncing) return // another sync (e.g. manual) is running
-  //     try {
-  //       shieldedSyncInProgressRef.current = true
-  //       const available = await isNamadaAvailable()
-  //       if (!available) return
-
-  //       const allAccounts = (await getNamadaAccounts()) as any[]
-  //       const shielded = (allAccounts || []).filter((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-  //       const vks: DatedViewingKey[] = []
-  //       for (const a of shielded) {
-  //         let birthday = 0
-  //         if (typeof a?.timestamp === 'number' && a.timestamp > 0) {
-  //           try { birthday = await fetchBlockHeightByTimestamp(a.timestamp) } catch { }
-  //         }
-  //         vks.push({ key: String(a.viewingKey), birthday })
-  //       }
-  //       if (vks.length === 0) return
-
-  //       // Show spinner during auto sync/fetch
-  //       setIsAutoShieldedSyncing(true)
-
-  //       const chainId = await fetchChainIdFromRpc((sdk as any).url)
-  //       const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
-  //       await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-  //       await runShieldedSync({
-  //         sdk: sdk as any,
-  //         viewingKeys: vks,
-  //         chainId,
-  //         maspIndexerUrl: (import.meta as any)?.env?.VITE_NAMADA_MASP_INDEXER_URL as string | undefined,
-  //       })
-
-  //       try {
-  //         const firstVk = vks[0]?.key
-  //         if (firstVk) {
-  //           const [usdcAddr, namAddr] = await Promise.all([
-  //             getUSDCAddressFromRegistry(),
-  //             getNAMAddressFromRegistry(),
-  //           ])
-  //           const tokens = [usdcAddr, namAddr].filter((x): x is string => typeof x === 'string' && x.length > 0)
-  //           if (tokens.length > 0) {
-  //             const balances = await fetchShieldedBalances(sdk as any, firstVk, tokens, chainId)
-  //             const map = new Map<string, string>(balances)
-  //             if (usdcAddr) {
-  //               const usdcMin = map.get(usdcAddr) || '0'
-  //               setUsdcShieldedMinDenom(usdcMin)
-  //               dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: formatMinDenom(usdcMin, 'USDC') } } })
-  //             }
-  //             if (namAddr) {
-  //               const namMin = map.get(namAddr) || '0'
-  //               dispatch({ type: 'MERGE_BALANCES', payload: { namada: { namShielded: formatMinDenom(namMin, 'NAM') } } })
-  //             }
-  //           }
-  //         }
-  //       } catch { }
-  //     } catch {
-  //       // Silent; periodic background sync
-  //     } finally {
-  //       shieldedSyncInProgressRef.current = false
-  //       setIsAutoShieldedSyncing(false)
-  //     }
-  //   }
-
-  //   timer = window.setInterval(() => { void tick() }, 30000)
-  //   return () => { if (timer) window.clearInterval(timer) }
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [isReady, sdk, state.walletConnections.namada])
-
   const shorten = (addr: string) => (addr?.length > 10 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr)
 
   const validateAmount = (amount: string, availableBalance: string) => {
@@ -1287,7 +1186,7 @@ export const BridgeForm: React.FC = () => {
           placeholder="Enter an amount"
           value={depositAmount}
           onChange={(e) => setDepositAmount(e.target.value)}
-          disabled={depositTx.status !== 'idle'}
+          disabled={!!latestDepositTx}
           left={<i className="fa-regular fa-paper-plane text-muted-fg/80"></i>}
           rightSize="lg"
           right={
@@ -1315,7 +1214,7 @@ export const BridgeForm: React.FC = () => {
 
       <div>
         <div className="label-text">Network</div>
-        <SelectMenu value={chain} onChange={setChain} options={chains} className={depositTx.status !== 'idle' ? 'opacity-60 pointer-events-none' : ''} />
+        <SelectMenu value={chain} onChange={setChain} options={chains} disabled={!!latestDepositTx} />
         <div className="info-text ml-4">
           My Address: {chain === 'namada' ? shorten(state.addresses.namada.transparent) : (state.walletConnections.metamask === 'connected' ? shorten((state.addresses as any)[chain]) : (
             <button
@@ -1374,7 +1273,7 @@ export const BridgeForm: React.FC = () => {
             Auto Fill
           </button>
         </div>
-        <Input placeholder="tnam..." value={depositAddress} onChange={(e) => setDepositAddress(e.target.value)} disabled={depositTx.status !== 'idle'} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
+        <Input placeholder="tnam..." value={depositAddress} onChange={(e) => setDepositAddress(e.target.value)} disabled={!!latestDepositTx} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
         {(() => {
           const validation = validateForm(depositAmount, getAvailableBalance(chain), depositAddress)
           return validation.addressError && depositAddress !== '' ? (
@@ -1446,7 +1345,7 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        if (depositTx.status === 'idle') {
+        if (!latestDepositTx) {
           return (
             <div className="flex justify-center">
               <Button
@@ -1467,13 +1366,13 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        const statusText = depositTx.stage || (depositTx.status === 'submitting' ? 'Submitting transaction...' : 'Pending confirmation...')
+        const statusText = latestDepositTx?.stage || 'Pending confirmation...'
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                {depositTx.stage === 'Received on Namada' ? (
+                {latestDepositTx?.stage === 'Received on Namada' ? (
                   <i className="fa-solid fa-check-circle text-accent-green"></i>
                 ) : (
                   <Spinner size="sm" variant="accent" />
@@ -1485,22 +1384,22 @@ export const BridgeForm: React.FC = () => {
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground">{shorten(depositAddress)}</span></div>
                 <div className="flex justify-between"><span>On</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label} → Namada</span></div>
                 <div className="flex justify-between"><span>Sepolia Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  {depositTx.sepoliaHash ? (
+                  {latestDepositTx?.sepoliaHash ? (
                     <>
-                      <span>{depositTx.sepoliaHash.slice(0, 10)}...{depositTx.sepoliaHash.slice(-8)}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(depositTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
-                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${depositTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                      <span>{latestDepositTx.sepoliaHash!.slice(0, 10)}...{latestDepositTx.sepoliaHash!.slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(latestDepositTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${latestDepositTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                     </>
                   ) : '—'}
                 </span></div>
                 <div className="flex justify-between"><span>Namada Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  {depositTx.namadaHash ? (
+                  {latestDepositTx?.namadaHash ? (
                     <>
-                      <span>{(depositTx.namadaHash as string).slice(0, 10)}...{(depositTx.namadaHash as string).slice(-8)}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(depositTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <span>{(latestDepositTx.namadaHash as string).slice(0, 10)}...{(latestDepositTx.namadaHash as string).slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(latestDepositTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
                       <button onClick={() => {
-                        const hash = depositTx.namadaHash as string
-                        const url = (String(depositTx.namadaChainId || '').startsWith('housefire')
+                        const hash = latestDepositTx.namadaHash as string
+                        const url = (String(latestDepositTx.namadaChainId || '').startsWith('housefire')
                           ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
                           : `https://namada.world/transactions/${hash.toLowerCase()}`)
                         window.open(url, '_blank')
@@ -1512,7 +1411,7 @@ export const BridgeForm: React.FC = () => {
             </div>
             <div className="text-center">
               <div className="text-xs text-muted-fg mb-3">You can view the ongoing status of this transaction in the My Transactions page</div>
-              <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetDeposit}>Start new transaction</Button>
+              {/* <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetDeposit}>Start new transaction</Button> */}
             </div>
           </div>
         )
@@ -1534,7 +1433,7 @@ export const BridgeForm: React.FC = () => {
           placeholder="Enter an amount"
           value={sendAmount}
           onChange={(e) => setSendAmount(e.target.value)}
-          disabled={sendTx.status !== 'idle'}
+          disabled={!!latestSendTx}
           left={<i className="fa-regular fa-paper-plane text-muted-fg/80"></i>}
           rightSize="lg"
           right={
@@ -1619,7 +1518,7 @@ export const BridgeForm: React.FC = () => {
             Auto Fill
           </button>
         </div>
-        <Input placeholder="0x..." value={sendAddress} onChange={(e) => setSendAddress(e.target.value)} disabled={sendTx.status !== 'idle'} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
+        <Input placeholder="0x..." value={sendAddress} onChange={(e) => setSendAddress(e.target.value)} disabled={!!latestSendTx} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
         {(() => {
           const validation = validateForm(sendAmount, state.balances.namada.usdcShielded, sendAddress)
           return validation.addressError && sendAddress !== '' ? (
@@ -1630,7 +1529,7 @@ export const BridgeForm: React.FC = () => {
 
       <div>
         <div className="label-text">Network</div>
-        <SelectMenu value={chain} onChange={setChain} options={chains} className={sendTx.status !== 'idle' ? 'opacity-60 pointer-events-none' : ''} />
+        <SelectMenu value={chain} onChange={setChain} options={chains} disabled={!!latestSendTx} />
       </div>
 
       <div className="grid grid-cols-1 gap-2 border border-border-muted rounded-xl mt-8 p-4">
@@ -1664,7 +1563,7 @@ export const BridgeForm: React.FC = () => {
                   try {
                     const { useNamadaKeychain } = await import('../../utils/namada')
                     const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
-                    const { connect, checkConnection, getDefaultAccount, isAvailable } = useNamadaKeychain()
+                    const { connect, checkConnection, getDefaultAccount, getAccounts, isAvailable } = useNamadaKeychain()
                     const available = await isAvailable()
                     if (!available) {
                       showToast({ title: 'Namada Keychain', message: 'Please install the Namada Keychain extension', variant: 'error' })
@@ -1675,18 +1574,26 @@ export const BridgeForm: React.FC = () => {
                     await connect(chainId)
                     const ok = await checkConnection(chainId)
                     if (ok) {
-                      const acct = await getDefaultAccount()
+                      const acct: any = await getDefaultAccount()
                       dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
+                      let shieldedAddr: string | undefined
+                      try {
+                        const accounts: any[] = (await getAccounts()) as any[]
+                        const parent = Array.isArray(accounts) ? accounts.find((a) => a?.address === acct?.address) : undefined
+                        const child = parent?.id ? accounts.find((a) => (a?.parentId === parent.id) && typeof a?.address === 'string' && String(a?.type || '').toLowerCase().includes('shielded')) : undefined
+                        if (child?.address && String(child.address).startsWith('z')) shieldedAddr = child.address as string
+                      } catch {}
                       if (acct?.address) {
                         dispatch({
                           type: 'SET_ADDRESSES',
                           payload: {
                             ...state.addresses,
-                            namada: { ...state.addresses.namada, transparent: acct.address },
+                            namada: { ...state.addresses.namada, transparent: acct.address, shielded: shieldedAddr || state.addresses.namada.shielded },
                           },
                         })
                       }
                       showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })
+                      try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
                     } else {
                       showToast({ title: 'Namada Keychain', message: 'Failed to connect', variant: 'error' })
                     }
@@ -1701,7 +1608,7 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        if (sendTx.status === 'idle') {
+        if (!latestSendTx) {
           return (
             <div className="flex justify-center">
               <Button variant="submit" disabled={!validation.isValid} onClick={sendNowViaOrbiter} leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}>Send USDC</Button>
@@ -1709,13 +1616,13 @@ export const BridgeForm: React.FC = () => {
           )
         }
 
-        const statusText = sendTx.stage || (sendTx.status === 'submitting' ? 'Submitting transaction...' : sendTx.status === 'pending' ? 'Pending confirmation...' : 'Success')
+        const statusText = latestSendTx?.stage || 'Pending confirmation...'
 
         return (
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                {sendTx.stage === 'Minted on Sepolia' ? (
+                {latestSendTx?.stage === 'Minted on Sepolia' ? (
                   <i className="fa-solid fa-check-circle text-accent-green"></i>
                 ) : (
                   <Spinner size="sm" variant="accent" />
@@ -1730,13 +1637,13 @@ export const BridgeForm: React.FC = () => {
                 </span></div>
                 <div className="flex justify-between"><span>On chain</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label}</span></div>
                 <div className="flex justify-between"><span>Namada Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  {sendTx.namadaHash ? (
+                  {latestSendTx?.namadaHash ? (
                     <>
-                      <span>{(sendTx.namadaHash as string).slice(0, 10)}...{(sendTx.namadaHash as string).slice(-8)}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(sendTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <span>{(latestSendTx.namadaHash as string).slice(0, 10)}...{(latestSendTx.namadaHash as string).slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(latestSendTx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
                       <button onClick={() => {
-                        const hash = sendTx.namadaHash as string
-                        const url = (String(sendTx.namadaChainId || '').startsWith('housefire')
+                        const hash = latestSendTx.namadaHash as string
+                        const url = (String(latestSendTx.namadaChainId || '').startsWith('housefire')
                           ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
                           : `https://namada.world/transactions/${hash.toLowerCase()}`)
                         window.open(url, '_blank')
@@ -1745,20 +1652,20 @@ export const BridgeForm: React.FC = () => {
                   ) : '—'}
                 </span></div>
                 <div className="flex justify-between"><span>Sepolia Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  {sendTx.sepoliaHash ? (
+                  {latestSendTx?.sepoliaHash ? (
                     <>
-                      <span>{sendTx.sepoliaHash.slice(0, 10)}...{sendTx.sepoliaHash.slice(-8)}</span>
-                      <button onClick={() => { navigator.clipboard.writeText(sendTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
-                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${sendTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                      <span>{latestSendTx.sepoliaHash!.slice(0, 10)}...{latestSendTx.sepoliaHash!.slice(-8)}</span>
+                      <button onClick={() => { navigator.clipboard.writeText(latestSendTx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
+                      <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${latestSendTx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                     </>
                   ) : '—'}
                 </span></div>
               </div>
             </div>
-            {sendTx.stage && sendTx.stage !== 'Building IBC transfer' && (
+            {latestSendTx?.stage && (
               <div className="text-center">
                 <div className="text-sm text-foreground-secondary mb-3">You can follow the status of this transaction in the My Transactions page</div>
-                <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetSend}>Start new transaction</Button>
+                {/* <Button variant="ghost" size="sm" leftIcon={<i className="fas fa-rotate text-sm"></i>} onClick={resetSend}>Start new transaction</Button> */}
               </div>
             )}
           </div>
@@ -2150,6 +2057,24 @@ export const BridgeForm: React.FC = () => {
                         <i className="fa-solid fa-delete-left text-sm"></i>
                         <span>Clear Shielded Context</span>
                       </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const { createTxService } = await import('../../services/txService')
+                            const svc = createTxService(dispatch)
+                            svc.clearHistory()
+                            showToast({ title: 'Tx History', message: 'Cleared (local only)', variant: 'success' })
+                            setShowMoreDropdown(false)
+                          } catch (e: any) {
+                            showToast({ title: 'Tx History', message: e?.message ?? 'Failed to clear', variant: 'error' })
+                          }
+                        }}
+                        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
+                      >
+                        <i className="fa-solid fa-broom text-sm"></i>
+                        <span>Debug: Clear Tx History</span>
+                      </button>
                     </div>
                   )}
                 </div>
@@ -2196,6 +2121,14 @@ export const BridgeForm: React.FC = () => {
               >
                 Shield Now
               </Button>
+              {shieldFeeNam && (
+                <div className="relative group inline-block ml-2">
+                  <i className="fa-solid fa-gas-pump text-foreground-secondary/80 text-xs"></i>
+                  <div className="absolute left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block bg-card border border-border-muted text-foreground text-xs rounded-md px-2 py-1 whitespace-nowrap shadow-lg z-10">
+                    Estimated fee: {shieldFeeNam}
+                  </div>
+                </div>
+              )}
               {isShielding && <Spinner size="sm" variant="accent" />}
             </div>
           </div>
@@ -2240,6 +2173,14 @@ export const BridgeForm: React.FC = () => {
               >
                 Shield Now
               </Button>
+              {shieldFeeNam && (
+                <div className="relative group inline-block ml-2">
+                  <i className="fa-solid fa-gas-pump text-foreground-secondary/80 text-xs"></i>
+                  <div className="absolute left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block bg-card border border-border-muted text-foreground text-xs rounded-md px-2 py-1 whitespace-nowrap shadow-lg z-10">
+                    Estimated fee: {shieldFeeNam}
+                  </div>
+                </div>
+              )}
               {isShielding && <Spinner size="sm" variant="accent" />}
               {/* <Button
                 variant="primary"

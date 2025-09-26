@@ -59,10 +59,14 @@ export async function depositForBurnSepolia(params: DepositForBurnParams): Promi
   console.log('   Allowance:', ethers.formatUnits(allowance, 6), 'USDC')
   
   if (allowance < amountWei) {
-    console.log('⚠️  Insufficient allowance, approving...')
+    console.log('⚠️  Insufficient allowance, approving large amount for future transactions...')
     try {
-      const approveTx = await usdc.approve(params.tokenMessengerAddress, amountWei)
+      // Approve a large amount (1M USDC) to avoid repeated approval prompts
+      // This matches production DeFi app behavior for better UX
+      const largeApprovalAmount = ethers.parseUnits("1000000", 6) // 1M USDC
+      const approveTx = await usdc.approve(params.tokenMessengerAddress, largeApprovalAmount)
       console.log('   Approve tx hash:', approveTx.hash)
+      console.log('   Approving amount:', ethers.formatUnits(largeApprovalAmount, 6), 'USDC')
       const approveReceipt = await approveTx.wait()
       console.log('   ✅ Approval confirmed in block:', approveReceipt.blockNumber)
     } catch (err: any) {
