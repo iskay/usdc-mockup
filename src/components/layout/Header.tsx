@@ -6,6 +6,7 @@ import { useNamadaKeychain } from '../../utils/namada'
 import { useAppState } from '../../state/AppState'
 import { useNamadaSdk } from '../../state/NamadaSdkProvider'
 import { useBalanceService } from '../../services/balanceService'
+import { connectNamadaAction } from '../../features/bridge/services/bridgeActions'
 
 type NavItem = { label: string; icon: string; key: string }
 
@@ -34,21 +35,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const addressesRef = useRef(state.addresses)
   const { connect: connectNamada, disconnect: disconnectNamada, checkConnection: checkNamada, getDefaultAccount, getAccounts: getNamadaAccounts, isAvailable: isNamadaAvailable } = useNamadaKeychain()
 
-  // Helper: given a transparent account address, find its paired shielded account via parentId
-  const resolveShieldedForTransparent = async (transparentAddr?: string): Promise<string | null> => {
-    try {
-      if (!transparentAddr) return null
-      const accounts = (await getNamadaAccounts()) as any[]
-      if (!Array.isArray(accounts)) return null
-      const parent = accounts.find((a) => a?.address === transparentAddr)
-      if (!parent?.id) return null
-      const child = accounts.find((a) => (a?.parentId === parent.id) && typeof a?.address === 'string' && String(a?.type || '').toLowerCase().includes('shielded'))
-      if (child?.address && child.address.startsWith('z')) return child.address as string
-      return null
-    } catch {
-      return null
-    }
-  }
 
   useEffect(() => {
     addressesRef.current = state.addresses
@@ -107,27 +93,20 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           console.log('Namada extension not available')
           return
         }
-        // Get current chain ID from SDK
         const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
         const chainId = await fetchChainIdFromRpc((sdk as any).url)
         const connected = await checkNamada(chainId)
         if (connected) {
           console.log('Found existing Namada connection')
-          const acct = await getDefaultAccount()
-          dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
-          if (acct?.address) {
-            const shielded = await resolveShieldedForTransparent(acct.address)
-            dispatch({
-              type: 'SET_ADDRESSES',
-              payload: {
-                ...addressesRef.current,
-                namada: { ...addressesRef.current.namada, transparent: acct.address, shielded: shielded || addressesRef.current.namada.shielded },
-              },
-            })
-            console.log('Namada account:', acct, 'Shielded paired:', shielded)
-          }
-          showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
-          try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 300 }) } catch {}
+          await connectNamadaAction(
+            { sdk, state, dispatch, showToast, getNamadaAccounts },
+            {
+              onSuccess: () => {
+                showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
+                try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 300 }) } catch {}
+              }
+            }
+          )
         } else {
           console.log('No existing Namada connection found')
         }
@@ -274,36 +253,14 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
 
   const connectNamadaKeychain = async () => {
     try {
-      const available = await isNamadaAvailable()
-      if (!available) {
-        showToast({ title: 'Namada Keychain', message: 'Please install the Namada Keychain extension', variant: 'error' })
-        return
-      }
-      // Get current chain ID from SDK
-      const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
-      const chainId = await fetchChainIdFromRpc((sdk as any).url)
-      await connectNamada(chainId)
-      const connected = await checkNamada(chainId)
-      if (connected) {
-        const acct = await getDefaultAccount()
-        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { namada: 'connected' } })
-        if (acct?.address) {
-          const shielded = await resolveShieldedForTransparent(acct.address)
-          dispatch({
-            type: 'SET_ADDRESSES',
-            payload: {
-              ...addressesRef.current,
-              namada: { ...addressesRef.current.namada, transparent: acct.address, shielded: shielded || addressesRef.current.namada.shielded },
-            },
-          })
+      await connectNamadaAction(
+        { sdk, state, dispatch, showToast, getNamadaAccounts },
+        {
+          onSuccess: () => {
+            try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
+          }
         }
-        showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })
-        try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
-      } else {
-        showToast({ title: 'Namada Keychain', message: 'Failed to connect', variant: 'error' })
-      }
-    } catch (e: any) {
-      showToast({ title: 'Namada Keychain', message: e?.message ?? 'Connection failed', variant: 'error' })
+      )
     } finally {
       setOpenConnect(false)
     }

@@ -28,6 +28,7 @@ export type ShieldTrackContext = {
   amount: string
   tokenSymbol: 'USDC' | 'NAM'
   namadaHash?: string
+  namadaChainId?: string
 }
 
 const pollingJobs = new Map<string, AbortController>()
@@ -167,6 +168,7 @@ export function createTxService(dispatch: (action: any) => void) {
       status: 'pending',
       stage: 'Shield submitted',
       namadaHash: ctx.namadaHash,
+      namadaChainId: ctx.namadaChainId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     } as any })

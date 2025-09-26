@@ -1,6 +1,7 @@
 import React from 'react'
 import { Card, CardHeader, CardTitle } from '../../components/ui/Card'
 import { useAppState } from '../../state/AppState'
+import { getNamadaTxExplorerUrl } from '../../utils/explorer'
 import Spinner from '../../components/ui/Spinner'
 
 export const HistoryPage: React.FC = () => {
@@ -53,9 +54,8 @@ export const HistoryPage: React.FC = () => {
                           <button onClick={() => { navigator.clipboard.writeText(tx.namadaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
                           <button onClick={() => {
                             const hash = tx.namadaHash as string
-                            const url = (typeof (tx as any).namadaChainId === 'string' && (tx as any).namadaChainId.startsWith('housefire'))
-                              ? `https://testnet.namada.world/transactions/${hash.toLowerCase()}`
-                              : `https://namada.world/transactions/${hash.toLowerCase()}`
+                            const chainId = (tx as any).namadaChainId || ''
+                            const url = getNamadaTxExplorerUrl(chainId, hash)
                             window.open(url, '_blank')
                           }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                         </span></div>
