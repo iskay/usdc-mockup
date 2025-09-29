@@ -138,21 +138,27 @@ type SendInputs = {
 }
 
 export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast, getNamadaAccounts }: Deps, inputs: SendInputs) {
-  if (state.walletConnections.namada !== 'connected') {
-    showToast({ title: 'Namada', message: 'Connect Namada Keychain first', variant: 'error' }); return
-  }
-  if (!sdk) { showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' }); return }
+  // Generate a stable transaction ID once at the beginning
+  const txId = `send_${Date.now()}`
+  let transactionAdded = false
+  let worker: Worker | null = null
 
-  const transparent = state.addresses.namada.transparent
-  const shielded = state.addresses.namada.shielded || ''
-  if (!transparent || !shielded) { showToast({ title: 'Send', message: 'Missing Namada addresses', variant: 'error' }); return }
+  try {
+    if (state.walletConnections.namada !== 'connected') {
+      showToast({ title: 'Namada', message: 'Connect Namada Keychain first', variant: 'error' }); return
+    }
+    if (!sdk) { showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' }); return }
 
-  const chainId = await fetchChainIdFromRpc((sdk as any).url)
-  const usdcToken = await getUSDCAddressFromRegistry()
-  if (!usdcToken) { showToast({ title: 'Send', message: 'USDC token address not found', variant: 'error' }); return }
+    const transparent = state.addresses.namada.transparent
+    const shielded = state.addresses.namada.shielded || ''
+    if (!transparent || !shielded) { showToast({ title: 'Send', message: 'Missing Namada addresses', variant: 'error' }); return }
 
-  const amountInBase = new BigNumber(inputs.amountDisplay).multipliedBy(1e6)
-  if (!amountInBase.isFinite() || amountInBase.isLessThanOrEqualTo(0)) { showToast({ title: 'Send', message: 'Invalid amount', variant: 'error' }); return }
+    const chainId = await fetchChainIdFromRpc((sdk as any).url)
+    const usdcToken = await getUSDCAddressFromRegistry()
+    if (!usdcToken) { showToast({ title: 'Send', message: 'USDC token address not found', variant: 'error' }); return }
+
+    const amountInBase = new BigNumber(inputs.amountDisplay).multipliedBy(1e6)
+    if (!amountInBase.isFinite() || amountInBase.isLessThanOrEqualTo(0)) { showToast({ title: 'Send', message: 'Invalid amount', variant: 'error' }); return }
 
   const channelId = (import.meta as any)?.env?.VITE_CHANNEL_ID_ON_NAMADA as string || 'channel-27'
   const receiver = 'noble15xt7kx5mles58vkkfxvf0lq78sw04jajvfgd4d'
@@ -194,10 +200,6 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     refundTarget = disposable?.address
   } catch {}
 
-  // Generate a stable transaction ID once at the beginning
-  const txId = `send_${Date.now()}`
-  let transactionAdded = false
-
   const result = await buildSignBroadcastUnshieldingIbc(
     { sdk: sdk as any, accountPublicKey, ownerAddress: ownerAddressForWrapper, source: pseudoExtendedKey, receiver, tokenAddress: usdcToken, amountInBase, gas, chain: chainSett, channelId, gasSpendingKey: pseudoExtendedKey, memo, refundTarget },
     (phase) => {
@@ -229,7 +231,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
     const sepoliaRpc = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
     const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
-    const worker = new Worker(new URL('../../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
+    worker = new Worker(new URL('../../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = (ev: MessageEvent) => {
       const data = ev.data as any
       if (data.type === 'update' && data.id === txId) {
@@ -245,7 +247,14 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
         if (data.data?.sepoliaHash) {
           dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia', status: 'success' } } })
         }
-        worker.terminate()
+        worker?.terminate()
+        worker = null
+      } else if (data.type === 'error' && data.id === txId) {
+        // Handle worker errors
+        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'error', errorMessage: data.error, stage: 'Transaction failed' } } })
+        showToast({ title: 'Send Error', message: data.error, variant: 'error' })
+        worker?.terminate()
+        worker = null
       }
     }
     worker.postMessage({
@@ -277,6 +286,43 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     })
   } catch (e) {
     console.warn('[Polling Worker] spawn/start failed', e)
+  }
+
+  } catch (error: any) {
+    // Handle any errors during the main transaction flow
+    console.error('[Send Transaction] Error:', error)
+    
+    // Update transaction status to error if it was added
+    if (transactionAdded) {
+      dispatch({ type: 'UPDATE_TRANSACTION', payload: { 
+        id: txId, 
+        changes: { 
+          status: 'error', 
+          errorMessage: error?.message || 'Transaction failed',
+          stage: 'Transaction failed'
+        } 
+      } })
+    }
+    
+    // Stop any running worker
+    if (worker) {
+      (worker as Worker).terminate()
+      worker = null
+    }
+    
+    // Stop any polling jobs in txService
+    try {
+      const { createTxService } = await import('../../../services/txService')
+      const svc = createTxService(dispatch)
+      svc.stopTracking(txId)
+    } catch {}
+    
+    // Show error toast
+    showToast({ 
+      title: 'Send Transaction Failed', 
+      message: error?.message || 'An unexpected error occurred', 
+      variant: 'error' 
+    })
   }
 }
 
@@ -392,18 +438,19 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
 }
 
 export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: Deps, inputs: DepositInputs) {
-  if (!window.ethereum) {
-    showToast({ title: 'MetaMask Not Found', message: 'Please install the MetaMask extension', variant: 'error' })
-    return
-  }
-
-  const validation = inputs.validateForm(inputs.amount, inputs.getAvailableBalance(inputs.chain), inputs.destinationAddress)
-  if (!validation.isValid) return
-
-  // Fetch the current Namada chain ID
-  const chainId = await fetchChainIdFromRpc((sdk as any).url)
-
   const txId = inputs.txId || `dep_${Date.now()}`
+  
+  try {
+    if (!window.ethereum) {
+      showToast({ title: 'MetaMask Not Found', message: 'Please install the MetaMask extension', variant: 'error' })
+      return
+    }
+
+    const validation = inputs.validateForm(inputs.amount, inputs.getAvailableBalance(inputs.chain), inputs.destinationAddress)
+    if (!validation.isValid) return
+
+    // Fetch the current Namada chain ID
+    const chainId = await fetchChainIdFromRpc((sdk as any).url)
   dispatch({
     type: 'ADD_TRANSACTION',
     payload: {
@@ -493,6 +540,35 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
     void svc.trackDeposit({ txId, amountUsdc: inputs.amount, forwardingAddress, namadaReceiver: inputs.destinationAddress, sepoliaHash: txHash })
   } catch (e) {
     console.warn('[TxService] trackDeposit start failed', e)
+  }
+
+  } catch (error: any) {
+    // Handle any errors during the deposit transaction flow
+    console.error('[Deposit Transaction] Error:', error)
+    
+    // Update transaction status to error
+    dispatch({ type: 'UPDATE_TRANSACTION', payload: { 
+      id: txId, 
+      changes: { 
+        status: 'error', 
+        errorMessage: error?.message || 'Deposit transaction failed',
+        stage: 'Transaction failed'
+      } 
+    } })
+    
+    // Stop any polling jobs in txService
+    try {
+      const { createTxService } = await import('../../../services/txService')
+      const svc = createTxService(dispatch)
+      svc.stopTracking(txId)
+    } catch {}
+    
+    // Show error toast
+    showToast({ 
+      title: 'Deposit Transaction Failed', 
+      message: error?.message || 'An unexpected error occurred', 
+      variant: 'error' 
+    })
   }
 }
 
