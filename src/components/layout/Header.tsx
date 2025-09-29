@@ -93,8 +93,21 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           console.log('Namada extension not available')
           return
         }
-        const { fetchChainIdFromRpc } = await import('../../utils/shieldedSync')
-        const chainId = await fetchChainIdFromRpc((sdk as any).url)
+        
+        // Fetch chain ID directly from RPC to avoid SDK initialization dependency
+        const rpcUrl = import.meta.env.VITE_NAMADA_RPC_URL || 'https://rpc.testnet.siuuu.click'
+        const response = await fetch(`${rpcUrl}/status`)
+        if (!response.ok) {
+          console.log('Failed to fetch chain ID from RPC')
+          return
+        }
+        const data = await response.json()
+        const chainId = data?.result?.node_info?.network
+        if (!chainId) {
+          console.log('Could not extract chain ID from RPC response')
+          return
+        }
+        
         const connected = await checkNamada(chainId)
         if (connected) {
           console.log('Found existing Namada connection')

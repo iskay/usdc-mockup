@@ -14,6 +14,21 @@ import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '
 import { depositForBurnSepolia } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
 
+// Helper function to fetch chain ID directly from RPC to avoid SDK dependency
+async function fetchChainIdFromRpcDirect(): Promise<string> {
+  const rpcUrl = import.meta.env.VITE_NAMADA_RPC_URL || 'https://rpc.testnet.siuuu.click'
+  const response = await fetch(`${rpcUrl}/status`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chain ID from RPC: ${response.status}`)
+  }
+  const data = await response.json()
+  const chainId = data?.result?.node_info?.network
+  if (!chainId) {
+    throw new Error('Could not extract chain ID from RPC response')
+  }
+  return chainId
+}
+
 type Deps = {
   sdk: any
   state: any
@@ -59,7 +74,7 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
     return
   }
 
-  const chainId = await fetchChainIdFromRpc((sdk as any).url)
+  const chainId = await fetchChainIdFromRpcDirect()
   const transferToken = 'tnam1pkkyepxa05mn9naftfpqy3l665tehe859ccp2wts'
   const amountInBase = new BigNumber(100)
   const channelId = 'channel-27'
@@ -117,7 +132,7 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
 }
 
 export async function clearShieldedContextAction({ sdk, dispatch, showToast }: Deps) {
-  const chainId = await fetchChainIdFromRpc((sdk as any).url)
+  const chainId = await fetchChainIdFromRpcDirect()
   // call existing helper directly through BridgeForm props
   // the caller will clear local balances and dropdown
   await (await import('../../../utils/shieldedSync')).clearShieldedContext(sdk as any, chainId)
@@ -153,7 +168,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     const shielded = state.addresses.namada.shielded || ''
     if (!transparent || !shielded) { showToast({ title: 'Send', message: 'Missing Namada addresses', variant: 'error' }); return }
 
-    const chainId = await fetchChainIdFromRpc((sdk as any).url)
+    const chainId = await fetchChainIdFromRpcDirect()
     const usdcToken = await getUSDCAddressFromRegistry()
     if (!usdcToken) { showToast({ title: 'Send', message: 'USDC token address not found', variant: 'error' }); return }
 
@@ -336,7 +351,7 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
     return
   }
 
-  const chainId = await fetchChainIdFromRpc((sdk as any).url)
+  const chainId = await fetchChainIdFromRpcDirect()
   const transparent = state.addresses.namada.transparent
   const shielded = state.addresses.namada.shielded || ''
   if (!transparent || !shielded) {
@@ -450,7 +465,7 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
     if (!validation.isValid) return
 
     // Fetch the current Namada chain ID
-    const chainId = await fetchChainIdFromRpc((sdk as any).url)
+    const chainId = await fetchChainIdFromRpcDirect()
   dispatch({
     type: 'ADD_TRANSACTION',
     payload: {
@@ -575,14 +590,16 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
 export async function connectNamadaAction({ sdk, state, dispatch, showToast, getNamadaAccounts }: Deps, inputs: ConnectNamadaInputs) {
   try {
     const { useNamadaKeychain } = await import('../../../utils/namada')
-    const { fetchChainIdFromRpc } = await import('../../../utils/shieldedSync')
     const { connect, checkConnection, getDefaultAccount, getAccounts, isAvailable } = useNamadaKeychain()
     const available = await isAvailable()
     if (!available) {
       showToast({ title: 'Namada Keychain', message: 'Please install the Namada Keychain extension', variant: 'error' })
       return
     }
-    const chainId = await fetchChainIdFromRpc((sdk as any).url)
+    
+    // Fetch chain ID directly from RPC to avoid SDK initialization dependency
+    const chainId = await fetchChainIdFromRpcDirect()
+    
     await connect(chainId)
     const ok = await checkConnection(chainId)
     if (ok) {
@@ -613,6 +630,3 @@ export async function connectNamadaAction({ sdk, state, dispatch, showToast, get
     showToast({ title: 'Namada Keychain', message: e?.message ?? 'Connection failed', variant: 'error' })
   }
 }
-
-
-
