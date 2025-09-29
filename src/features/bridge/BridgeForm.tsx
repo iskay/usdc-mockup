@@ -486,11 +486,11 @@ export const BridgeForm: React.FC = () => {
           }}
           autoFillDisabled={state.walletConnections.metamask !== 'connected'}
           onClickAutoFill={() => {
-            const metamaskAddress = state.addresses.ethereum || state.addresses.base || state.addresses.sepolia
-            if (metamaskAddress) {
-              setSendAddress(metamaskAddress)
-            }
-          }}
+              const metamaskAddress = state.addresses.ethereum || state.addresses.base || state.addresses.sepolia
+              if (metamaskAddress) {
+                setSendAddress(metamaskAddress)
+              }
+            }}
         />}
       </Card>
 
@@ -620,11 +620,11 @@ export const BridgeForm: React.FC = () => {
               >
                 Shield Now
               </Button>
-              {shieldFeeNam && (
+              {shieldFeeUsdc && (
                 <div className="relative group inline-block ml-2">
                   <i className="fa-solid fa-gas-pump text-foreground-secondary/80 text-xs"></i>
                   <div className="absolute left-1/2 -translate-x-1/2 mt-2 hidden group-hover:block bg-card border border-border-muted text-foreground text-xs rounded-md px-2 py-1 whitespace-nowrap shadow-lg z-10">
-                    Estimated fee: {shieldFeeNam}
+                    Estimated fee: {shieldFeeUsdc}
                   </div>
                 </div>
               )}

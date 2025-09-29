@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import BigNumber from 'bignumber.js'
 import { fetchGasEstimateIbcUnshieldingTransfer } from '../../../utils/indexer'
-import { getNAMAddressFromRegistry, getUSDCAddressFromRegistry } from '../../../utils/namadaBalance'
+import { getNAMAddressFromRegistry, getUSDCAddressFromRegistry, getAssetDecimalsByDisplay } from '../../../utils/namadaBalance'
 import { estimateGasForToken } from '../utils/gas'
 
 export function useSendFeeEstimate(isReady: boolean, sdk: any, amount: string, address: string) {
@@ -18,9 +18,15 @@ export function useSendFeeEstimate(isReady: boolean, sdk: any, amount: string, a
         const gas = await estimateGasForToken(gasTokenCandidate, ['IbcTransfer'], String(estimate.avg || 75000))
         const feeInMinDenom = new BigNumber(gas.gasLimit).multipliedBy(gas.gasPriceInMinDenom)
         const isUSDC = gas.gasToken === usdcToken
+        
+        // Convert from min denom to display units using correct decimal places for each token
+        const tokenDisplay = isUSDC ? 'USDC' : 'NAM'
+        const decimals = getAssetDecimalsByDisplay(tokenDisplay, 6)
+        const feeInDisplayUnits = feeInMinDenom.dividedBy(new BigNumber(10).pow(decimals))
+        
         const formatted = isUSDC
-          ? `$${feeInMinDenom.toFixed(4)}`
-          : `${feeInMinDenom.toFixed(6)} NAM`
+          ? `$${feeInDisplayUnits.toFixed(4)}`
+          : `${feeInDisplayUnits.toFixed(6)} NAM`
         setSendFeeEst(formatted)
       } catch (e) {
         setSendFeeEst(null)

@@ -1,4 +1,5 @@
 import React from 'react'
+import BigNumber from 'bignumber.js'
 import { PixelRow } from '../../../components/layout/Pixels'
 import { SelectMenu } from '../../../components/ui/SelectMenu'
 import { Input } from '../../../components/ui/Input'
@@ -51,6 +52,38 @@ const SendSection: React.FC<Props> = ({
   autoFillDisabled,
   onClickAutoFill,
 }) => {
+  // Calculate available amount by subtracting gas fees from shielded balance
+  const calculateAvailableAmount = () => {
+    if (availableShielded === '--' || !sendFeeEst) {
+      return availableShielded
+    }
+    
+    try {
+      const shieldedBalance = new BigNumber(availableShielded)
+      if (shieldedBalance.isLessThanOrEqualTo(0)) {
+        return availableShielded
+      }
+      
+      // Parse fee estimate (format: "$0.0843" or "0.000001 NAM")
+      let feeAmount = new BigNumber(0)
+      if (sendFeeEst.startsWith('$')) {
+        // USDC fee: "$0.0843" -> "0.0843"
+        const feeStr = sendFeeEst.slice(1)
+        feeAmount = new BigNumber(feeStr)
+      } else if (sendFeeEst.includes(' NAM')) {
+        // NAM fee: "0.000001 NAM" -> "0.000001"
+        const feeStr = sendFeeEst.replace(' NAM', '')
+        feeAmount = new BigNumber(feeStr)
+      }
+      
+      const availableAmount = BigNumber.max(shieldedBalance.minus(feeAmount), 0)
+      return availableAmount.toFixed(6)
+    } catch {
+      return availableShielded
+    }
+  }
+  
+  const availableAmount = calculateAvailableAmount()
   return (
     <div className="space-y-6 text-left">
       <div>
@@ -73,7 +106,7 @@ const SendSection: React.FC<Props> = ({
               <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
-                onClick={() => setSendAmount(availableShielded)}
+                onClick={() => setSendAmount(availableAmount)}
                 disabled={!isNamadaConnected}
                 className={`rounded-md font-semibold px-2 py-1 text-xs text-muted-fg hover:bg-sidebar-selected ${!isNamadaConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
@@ -83,7 +116,7 @@ const SendSection: React.FC<Props> = ({
           }
         />
         <div className="info-text ml-4 flex items-center gap-2">
-          <span>Available: {availableShielded} USDC</span>
+          <span>Available: {availableAmount} USDC</span>
           {availableShielded === '--' && !isShieldedSyncing && !isShieldedBalanceComputing && (
             <button 
               type="button" 
@@ -125,7 +158,7 @@ const SendSection: React.FC<Props> = ({
         </div>
         <Input placeholder="0x..." value={sendAddress} onChange={(e) => setSendAddress(e.target.value)} disabled={!!latestSendTx || !isNamadaConnected} left={<i className="mx-1 fa-regular fa-user text-muted-fg"></i>} />
         {(() => {
-          const validation = validateForm(sendAmount, availableShielded, sendAddress)
+          const validation = validateForm(sendAmount, availableAmount, sendAddress)
           return validation.addressError && sendAddress !== '' ? (
             <div className="text-red-400 text-sm ml-4 mt-1">{validation.addressError}</div>
           ) : null
@@ -155,7 +188,7 @@ const SendSection: React.FC<Props> = ({
       </div>
 
       {(() => {
-        const validation = validateForm(sendAmount, availableShielded, sendAddress)
+        const validation = validateForm(sendAmount, availableAmount, sendAddress)
         if (!latestSendTx) {
           if (!isNamadaConnected) {
             return (

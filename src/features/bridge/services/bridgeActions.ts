@@ -159,9 +159,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const memo = buildOrbiterCctpMemo({ destinationDomain: 0, evmRecipientHex20: inputs.destinationAddress })
   const mintRecipientB64 = evmHex20ToBase64_32(inputs.destinationAddress)
 
-  const namAddr = await getNAMAddressFromRegistry()
-  const namToken = namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
-  const gas = await estimateGasForToken(namToken, ['IbcTransfer'], '90000')
+  const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], '90000')
   const chainSett = { chainId, nativeTokenAddress: gas.gasToken }
 
   // Wrapper signer
@@ -304,7 +302,8 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
     // Drive user toasts by build/sign/submit phases coming from txShield
     const decimals = getAssetDecimalsByDisplay(inputs.display, 6)
     const defaultAmountInBase = new BigNumber(1).multipliedBy(new BigNumber(10).pow(decimals))
-    const amountInBase = inputs.amountInBase ?? defaultAmountInBase
+    let amountInBase = inputs.amountInBase ?? defaultAmountInBase
+    
     // Determine public key presence (affects fee estimate via potential RevealPk)
     const publicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
 
@@ -320,6 +319,13 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
         gasLimit: inputs.gas.gasLimit,
         gasPriceInMinDenom: inputs.gas.gasPriceInMinDenom,
       }
+    }
+
+    // If using the same token for gas as the token being shielded, subtract gas fees from amount
+    if (gas.gasToken === inputs.tokenAddress) {
+      const gasFeeInMinDenom = new BigNumber(gas.gasLimit).multipliedBy(gas.gasPriceInMinDenom)
+      amountInBase = BigNumber.max(amountInBase.minus(gasFeeInMinDenom), 0)
+      console.info(`[Shield ${inputs.display.toUpperCase()}] Subtracting gas fees: ${gasFeeInMinDenom.toString()} from amount`)
     }
 
     const chain = { chainId, nativeTokenAddress: gas.gasToken }

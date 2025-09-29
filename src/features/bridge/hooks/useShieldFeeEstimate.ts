@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import BigNumber from 'bignumber.js'
-import { getNAMAddressFromRegistry, getUSDCAddressFromRegistry } from '../../../utils/namadaBalance'
+import { getNAMAddressFromRegistry, getUSDCAddressFromRegistry, getAssetDecimalsByDisplay } from '../../../utils/namadaBalance'
 import { estimateGasForToken } from '../utils/gas'
 
 export function useShieldFeeEstimate(isReady: boolean, sdk: any, transparentAddress?: string | null) {
@@ -20,11 +20,16 @@ export function useShieldFeeEstimate(isReady: boolean, sdk: any, transparentAddr
         const baseKinds = ['ShieldingTransfer']
         const txKinds = publicKey ? baseKinds : ['RevealPk', ...baseKinds]
         const gas = await estimateGasForToken(gasTokenCandidate, txKinds, '50000')
-
         const feeInMinDenom = new BigNumber(gas.gasLimit).multipliedBy(gas.gasPriceInMinDenom)
         const isUsdcGas = gas.gasToken === usdcToken
-        setShieldFeeUsdc(isUsdcGas ? `$${feeInMinDenom.toFixed(4)}` : null)
-        setShieldFeeNam(!isUsdcGas ? `${feeInMinDenom.toFixed(6)} NAM` : null)
+        
+        // Convert from min denom to display units using correct decimal places for each token
+        const tokenDisplay = isUsdcGas ? 'USDC' : 'NAM'
+        const decimals = getAssetDecimalsByDisplay(tokenDisplay, 6)
+        const feeInDisplayUnits = feeInMinDenom.dividedBy(new BigNumber(10).pow(decimals))
+        
+        setShieldFeeUsdc(isUsdcGas ? `$${feeInDisplayUnits.toFixed(4)}` : null)
+        setShieldFeeNam(!isUsdcGas ? `${feeInDisplayUnits.toFixed(6)} NAM` : null)
       } catch {
         setShieldFeeUsdc(null)
         setShieldFeeNam(null)
