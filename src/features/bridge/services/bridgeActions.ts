@@ -385,8 +385,26 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
     const defaultAmountInBase = new BigNumber(1).multipliedBy(new BigNumber(10).pow(decimals))
     let amountInBase = inputs.amountInBase ?? defaultAmountInBase
     
-    // Determine public key presence (affects fee estimate via potential RevealPk)
-    const publicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
+    // Get public key from Namada extension (needed for RevealPK transaction)
+    let publicKey = ''
+    try {
+      const namada: any = (window as any).namada
+      if (namada?.accounts) {
+        const accounts = await namada.accounts()
+        const account = accounts.find((acc: any) => acc.address === transparent)
+        if (account?.publicKey) {
+          publicKey = account.publicKey
+          console.log('[Shield] Found public key from extension:', publicKey.slice(0, 16) + '...')
+        } else {
+          console.log('[Shield] No public key found in extension for address:', transparent.slice(0, 12) + '...')
+        }
+      }
+    } catch (error) {
+      console.warn('[Shield] Failed to get public key from extension:', error)
+    }
+    
+    // Note: We don't fallback to RPC query because if the public key hasn't been revealed yet,
+    // the RPC won't have it either. The extension is the source of truth for public keys.
 
     // Compute gas dynamically using indexer
     const txKinds: string[] = ['ShieldingTransfer']

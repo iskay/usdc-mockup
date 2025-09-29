@@ -76,6 +76,26 @@ export async function buildShieldingBatch(
       if (type === 'error') { worker.removeEventListener('message', onMsg as EventListener); reject(new Error(error || 'Build failed')) }
     }
     worker.addEventListener('message', onMsg as EventListener)
+    
+    // Debug: log what we're sending to the worker
+    console.log('[txShield] Sending build-shielding payload to worker:', {
+      account: {
+        address: fromTransparent?.slice(0, 12) + '...',
+        publicKey: accountPublicKey ? accountPublicKey.slice(0, 16) + '...' : 'EMPTY',
+      },
+      gasConfig: {
+        gasToken: gas.gasToken,
+        gasLimit: gas.gasLimit.toString(),
+        gasPriceInMinDenom: gas.gasPriceInMinDenom.toString(),
+      },
+      chain,
+      fromTransparent: fromTransparent?.slice(0, 12) + '...',
+      toShielded: toShielded?.slice(0, 12) + '...',
+      tokenAddress,
+      amountInBase: amountInBase.toString(),
+      memo: memo ? `[${memo.length} chars]` : undefined,
+    })
+    
     worker.postMessage({ type: 'build-shielding', payload: {
       account: {
         address: fromTransparent,

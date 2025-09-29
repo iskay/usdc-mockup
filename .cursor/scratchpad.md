@@ -80,6 +80,48 @@ The user requested refactoring opportunities in the `BridgeForm.tsx` file to imp
 **Files Modified**:
 - `src/features/bridge/services/bridgeActions.ts` - Fixed disposable signer usage
 
+### Enhanced Debug Logging for Shield Transaction Bech32m Error
+**Issue**: Shield transactions were failing with "Error decoding from Bech32m: parsing failed" when a public key reveal was needed.
+
+**Debug Enhancement**: Added comprehensive logging to help diagnose the Bech32m error:
+- Added validation and logging in `isPublicKeyRevealed` function to handle empty addresses
+- Added detailed logging in `buildTx` function around the `buildRevealPk` call
+- Added input validation logging in both `txShield.ts` and `MaspBuildWorker.ts`
+- Added logging to show account data, public key status, and wrapper transaction props
+
+**Files Modified**:
+- `src/workers/MaspBuildWorker.ts` - Added debug logging for public key reveal process
+- `src/utils/txShield.ts` - Added debug logging for worker payload
+
+### Fixed Shield Transaction Bech32m Error
+**Root Cause**: The `publicKey` was being set to an empty string because we were only querying the RPC, which doesn't have the public key for new accounts that haven't revealed it yet.
+
+**Solution**: 
+- Modified `shieldNowForTokenAction` to fetch the public key from the Namada extension first
+- Added fallback to RPC query if extension doesn't have the public key
+- Added comprehensive logging to track public key retrieval
+- The extension contains the actual bech32-encoded public key (starting with 'tpknam') needed for RevealPK transactions
+
+**Files Modified**:
+- `src/features/bridge/services/bridgeActions.ts` - Fixed public key retrieval from extension
+
+### Fixed Extension API Usage for Public Key Retrieval
+**Issue**: The code was using the wrong method to get accounts from the Namada extension (`signer.getAccounts()` instead of `namada.accounts()`).
+
+**Root Cause**: 
+- We were trying to call `signer.getAccounts()` which doesn't exist
+- The correct method is `namada.accounts()` as used in Namadillo
+- Removed the RPC fallback since it's pointless - if the public key hasn't been revealed, the RPC won't have it either
+
+**Solution**: 
+- Changed from `signer.getAccounts()` to `namada.accounts()`
+- Removed the RPC fallback logic
+- Added better logging to show when no public key is found
+- The extension is the source of truth for public keys
+
+**Files Modified**:
+- `src/features/bridge/services/bridgeActions.ts` - Fixed extension API usage
+
 ## Lessons
 
 ### Security and Architecture

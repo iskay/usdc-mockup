@@ -96,9 +96,15 @@ const getTxProps = (
 // Check if public key is revealed (simplified version)
 const isPublicKeyRevealed = async (address: string): Promise<boolean> => {
   try {
+    // Add validation for empty address
+    if (!address || address.trim() === '') {
+      console.warn('[MaspBuildWorker] isPublicKeyRevealed: Empty address provided')
+      return false
+    }
     const revealed = await sdk.rpc.queryPublicKey(address)
     return Boolean(revealed)
-  } catch {
+  } catch (error) {
+    console.warn('[MaspBuildWorker] isPublicKeyRevealed failed:', error)
     return false
   }
 }
@@ -121,10 +127,31 @@ const buildTx = async <T>(
   
   // Determine if RevealPK is needed:
   if (shouldRevealPk) {
+    console.log('[MaspBuildWorker] Checking if public key reveal is needed for address:', account.address?.slice(0, 12) + '...')
+    console.log('[MaspBuildWorker] Account public key:', account.publicKey ? account.publicKey.slice(0, 16) + '...' : 'EMPTY')
+    
     const publicKeyRevealed = await isPublicKeyRevealed(account.address)
+    console.log('[MaspBuildWorker] Public key revealed status:', publicKeyRevealed)
+    
     if (!publicKeyRevealed) {
-      const revealPkTx = await sdk.tx.buildRevealPk(wrapperTxProps)
-      txs.push(revealPkTx)
+      console.log('[MaspBuildWorker] Building RevealPK transaction...')
+      console.log('[MaspBuildWorker] WrapperTxProps for RevealPK:', {
+        token: wrapperTxProps.token,
+        feeAmount: wrapperTxProps.feeAmount?.toString(),
+        gasLimit: wrapperTxProps.gasLimit?.toString(),
+        chainId: wrapperTxProps.chainId,
+        publicKey: wrapperTxProps.publicKey ? wrapperTxProps.publicKey.slice(0, 16) + '...' : 'EMPTY',
+        memo: wrapperTxProps.memo
+      })
+      
+      try {
+        const revealPkTx = await sdk.tx.buildRevealPk(wrapperTxProps)
+        console.log('[MaspBuildWorker] RevealPK transaction built successfully')
+        txs.push(revealPkTx)
+      } catch (error) {
+        console.error('[MaspBuildWorker] Failed to build RevealPK transaction:', error)
+        throw error
+      }
     }
   }
 
@@ -177,6 +204,26 @@ self.onmessage = async (event: MessageEvent<InMsg>) => {
     if (msg.type === 'build-shielding') {
       if (!sdk) throw new Error('SDK not initialized')
       const { account, gasConfig, chain, fromTransparent, toShielded, tokenAddress, amountInBase, memo } = msg.payload
+      
+      // Debug: log sanitized inputs for shielding build
+      console.log('[MaspBuildWorker] build-shielding inputs:', {
+        account: {
+          address: account?.address?.slice(0, 12) + '...',
+          publicKey: account?.publicKey ? account.publicKey.slice(0, 16) + '...' : 'EMPTY',
+          type: account?.type
+        },
+        gasConfig: {
+          token: gasConfig?.gasToken,
+          gasLimit: gasConfig?.gasLimit,
+          gasPrice: gasConfig?.gasPriceInMinDenom
+        },
+        chain,
+        fromTransparent: fromTransparent?.slice(0, 12) + '...',
+        toShielded: toShielded?.slice(0, 12) + '...',
+        tokenAddress,
+        amountInBase,
+        memo: memo ? `[${memo.length} chars]` : undefined
+      })
       
       try { 
         await sdk.masp.loadMaspParams('', chain.chainId) 
