@@ -35,6 +35,7 @@ type Deps = {
   dispatch: (action: any) => void
   showToast: (args: { title: string; message: string; variant: 'info' | 'warning' | 'success' | 'error'; action?: any }) => void
   getNamadaAccounts: () => Promise<readonly any[]>
+  getCurrentState: () => any
 }
 
 type ShieldInputs = {
@@ -587,7 +588,7 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
   }
 }
 
-export async function connectNamadaAction({ sdk, state, dispatch, showToast, getNamadaAccounts }: Deps, inputs: ConnectNamadaInputs) {
+export async function connectNamadaAction({ sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState }: Deps, inputs: ConnectNamadaInputs) {
   try {
     const { useNamadaKeychain } = await import('../../../utils/namada')
     const { connect, checkConnection, getDefaultAccount, getAccounts, isAvailable } = useNamadaKeychain()
@@ -613,12 +614,20 @@ export async function connectNamadaAction({ sdk, state, dispatch, showToast, get
         if (child?.address && String(child.address).startsWith('z')) shieldedAddr = child.address as string
       } catch {}
       if (acct?.address) {
+        const currentState = getCurrentState()
+        console.log('connectNamadaAction: Current state.addresses:', currentState.addresses)
+        const newAddresses = {
+          ethereum: currentState.addresses.ethereum,
+          base: currentState.addresses.base,
+          sepolia: currentState.addresses.sepolia,
+          polygon: currentState.addresses.polygon,
+          arbitrum: currentState.addresses.arbitrum,
+          namada: { ...currentState.addresses.namada, transparent: acct.address, shielded: shieldedAddr || currentState.addresses.namada.shielded },
+        }
+        console.log('connectNamadaAction: Dispatching SET_ADDRESSES with:', newAddresses)
         dispatch({
           type: 'SET_ADDRESSES',
-          payload: {
-            ...state.addresses,
-            namada: { ...state.addresses.namada, transparent: acct.address, shielded: shieldedAddr || state.addresses.namada.shielded },
-          },
+          payload: newAddresses,
         })
       }
       showToast({ title: 'Namada Keychain', message: 'Connected', variant: 'success' })

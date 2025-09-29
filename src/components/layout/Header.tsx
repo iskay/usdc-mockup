@@ -28,17 +28,17 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const { fetchBalances } = useBalanceService()
   const hasInProgressTx = state.transactions.some(tx => tx.status === 'submitting' || tx.status === 'pending')
   const [openConnect, setOpenConnect] = useState(false)
-  const [isShieldedSyncing, setIsShieldedSyncing] = useState(false)
-  const [shieldedSyncProgress, setShieldedSyncProgress] = useState<number | null>(null)
   const connectRef = useRef<HTMLDivElement | null>(null)
   const hasAutoReconnected = useRef(false)
   const addressesRef = useRef(state.addresses)
+  const stateRef = useRef(state)
   const { connect: connectNamada, disconnect: disconnectNamada, checkConnection: checkNamada, getDefaultAccount, getAccounts: getNamadaAccounts, isAvailable: isNamadaAvailable } = useNamadaKeychain()
 
 
   useEffect(() => {
     addressesRef.current = state.addresses
-  }, [state.addresses])
+    stateRef.current = state
+  }, [state.addresses, state])
 
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -64,15 +64,18 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         if (accounts && accounts.length > 0) {
           const account = accounts[0]
           console.log('MetaMask account:', account)
+          console.log('Current addressesRef.current before dispatch:', addressesRef.current)
           dispatch({ type: 'SET_WALLET_CONNECTION', payload: { metamask: 'connected' } })
+          const newAddresses = {
+            ...addressesRef.current,
+            ethereum: account,
+            base: account,
+            sepolia: account,
+          }
+          console.log('Dispatching SET_ADDRESSES with:', newAddresses)
           dispatch({
             type: 'SET_ADDRESSES',
-            payload: {
-              ...addressesRef.current,
-              ethereum: account,
-              base: account,
-              sepolia: account,
-            },
+            payload: newAddresses,
           })
           showToast({ title: 'MetaMask', message: `Reconnected: ${account.slice(0, 6)}...${account.slice(-4)}`, variant: 'success' })
           try { void fetchBalances({ kinds: ['evmUsdc'], delayMs: 250 }) } catch {}
@@ -84,9 +87,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
       }
     })()
 
-    // Silent Namada reconnect
+    // Silent Namada reconnect (wait for MetaMask to complete first)
     ;(async () => {
       try {
+        // Wait a bit for MetaMask reconnect to complete
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         console.log('Checking for existing Namada connection...')
         const available = await isNamadaAvailable()
         if (!available) {
@@ -112,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         if (connected) {
           console.log('Found existing Namada connection')
           await connectNamadaAction(
-            { sdk, state, dispatch, showToast, getNamadaAccounts },
+            { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => stateRef.current },
             {
               onSuccess: () => {
                 showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
@@ -267,7 +273,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const connectNamadaKeychain = async () => {
     try {
       await connectNamadaAction(
-        { sdk, state, dispatch, showToast, getNamadaAccounts },
+        { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => stateRef.current },
         {
           onSuccess: () => {
             try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}

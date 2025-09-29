@@ -168,7 +168,7 @@ export const BridgeForm: React.FC = () => {
     setIsShielding(true)
     try {
       await shieldNowForTokenAction(
-        { sdk, state, dispatch, showToast, getNamadaAccounts },
+        { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
         {
         tokenAddress,
           display,
@@ -231,7 +231,7 @@ export const BridgeForm: React.FC = () => {
       if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
       
       await startSepoliaDepositAction(
-        { sdk, state, dispatch, showToast, getNamadaAccounts },
+        { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
         {
           amount: depositAmount,
           destinationAddress: depositAddress,
@@ -470,7 +470,7 @@ export const BridgeForm: React.FC = () => {
           onClickShieldedSync={() => { void triggerShieldedSync(setSendShieldedSyncProgress) }}
           onClickConnectNamada={() => { 
             void connectNamadaAction(
-              { sdk, state, dispatch, showToast, getNamadaAccounts },
+              { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
               {
                 onSuccess: () => {
                   try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
@@ -480,15 +480,19 @@ export const BridgeForm: React.FC = () => {
           }}
           onClickSendNow={async () => {
             await sendNowViaOrbiterAction(
-              { sdk, state, dispatch, showToast, getNamadaAccounts },
+              { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
               { amountDisplay: sendAmount, destinationAddress: sendAddress, destinationChain: chain }
             )
           }}
           autoFillDisabled={state.walletConnections.metamask !== 'connected'}
           onClickAutoFill={() => {
+              console.log('Auto Fill clicked, current state.addresses:', state.addresses)
               const metamaskAddress = state.addresses.ethereum || state.addresses.base || state.addresses.sepolia
+              console.log('MetaMask address found:', metamaskAddress)
               if (metamaskAddress) {
                 setSendAddress(metamaskAddress)
+              } else {
+                console.log('No MetaMask address found in state')
               }
             }}
         />}
@@ -553,11 +557,11 @@ export const BridgeForm: React.FC = () => {
                   </button>
                   {showMoreDropdown && (
                     <MoreActionsMenu
-                      onDebugOrbiter={async () => { try { await debugOrbiterAction({ sdk, state, dispatch, showToast, getNamadaAccounts }); setShowMoreDropdown(false) } catch {} }}
+                      onDebugOrbiter={async () => { try { await debugOrbiterAction({ sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state }); setShowMoreDropdown(false) } catch {} }}
                       onClearShieldedContext={async () => {
                         try {
                           if (!isReady || !sdk) { showToast({ title: 'Namada SDK', message: 'SDK not ready', variant: 'error' }); return }
-                          await clearShieldedContextAction({ sdk, state, dispatch, showToast, getNamadaAccounts })
+                          await clearShieldedContextAction({ sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state })
                             setUsdcShieldedMinDenom(null)
                             dispatch({ type: 'MERGE_BALANCES', payload: { namada: { usdcShielded: '--', namShielded: '--' } } })
                             setShowMoreDropdown(false)
@@ -568,7 +572,7 @@ export const BridgeForm: React.FC = () => {
                         }}
                       onClearTxHistory={async () => {
                         try {
-                          await clearTxHistoryAction({ sdk, state, dispatch, showToast, getNamadaAccounts })
+                          await clearTxHistoryAction({ sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state })
                             setShowMoreDropdown(false)
                           } catch (e: any) {
                             showToast({ title: 'Tx History', message: e?.message ?? 'Failed to clear', variant: 'error' })

@@ -150,8 +150,8 @@ const SendSection: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClickAutoFill}
-            disabled={autoFillDisabled || !isNamadaConnected}
-            className={`text-button ${autoFillDisabled || !isNamadaConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={autoFillDisabled}
+            className={`text-button ${autoFillDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             Auto Fill
           </button>
