@@ -21,7 +21,7 @@ import { useShieldFeeEstimate } from './hooks/useShieldFeeEstimate'
 import MoreActionsMenu from './MoreActionsMenu'
 import DepositSection from './sections/DepositSection'
 import SendSection from './sections/SendSection'
-import { debugOrbiterAction, clearShieldedContextAction, clearTxHistoryAction, sendNowViaOrbiterAction, shieldNowForTokenAction, startSepoliaDepositAction, connectNamadaAction } from './services/bridgeActions'
+import { debugOrbiterAction, clearShieldedContextAction, clearTxHistoryAction, sendNowViaOrbiterAction, shieldNowForTokenAction, startSepoliaDepositAction, connectNamadaAction, clearUnusedRefundAddressesAction } from './services/bridgeActions'
 
 export const BridgeForm: React.FC = () => {
   const { state, dispatch } = useAppState()
@@ -491,7 +491,7 @@ export const BridgeForm: React.FC = () => {
               console.log('MetaMask address found:', metamaskAddress)
               if (metamaskAddress) {
                 setSendAddress(metamaskAddress)
-              } else {
+                    } else {
                 console.log('No MetaMask address found in state')
               }
             }}
@@ -578,6 +578,14 @@ export const BridgeForm: React.FC = () => {
                             showToast({ title: 'Tx History', message: e?.message ?? 'Failed to clear', variant: 'error' })
                           }
                         }}
+                      onClearUnusedRefundAddresses={async () => {
+                        try {
+                          await clearUnusedRefundAddressesAction({ sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state })
+                          setShowMoreDropdown(false)
+                        } catch (e: any) {
+                          showToast({ title: 'Refund Cleanup', message: e?.message ?? 'Failed to clear unused refund addresses', variant: 'error' })
+                        }
+                      }}
                     />
                   )}
                 </div>

@@ -4,9 +4,10 @@ type MoreActionsMenuProps = {
   onDebugOrbiter: () => void
   onClearShieldedContext: () => void
   onClearTxHistory: () => void
+  onClearUnusedRefundAddresses: () => void
 }
 
-export const MoreActionsMenu: React.FC<MoreActionsMenuProps> = ({ onDebugOrbiter, onClearShieldedContext, onClearTxHistory }) => {
+export const MoreActionsMenu: React.FC<MoreActionsMenuProps> = ({ onDebugOrbiter, onClearShieldedContext, onClearTxHistory, onClearUnusedRefundAddresses }) => {
   return (
     <div className="absolute right-0 mt-2 w-72 rounded-xl border border-button-text-inactive bg-button-inactive text-button-text-inactive p-1 shadow-lg z-50">
       <button
@@ -32,6 +33,14 @@ export const MoreActionsMenu: React.FC<MoreActionsMenuProps> = ({ onDebugOrbiter
       >
         <i className="fa-solid fa-broom text-sm"></i>
         <span>Debug: Clear Tx History</span>
+      </button>
+      <button
+        type="button"
+        onClick={onClearUnusedRefundAddresses}
+        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
+      >
+        <i className="fa-solid fa-trash-can text-sm"></i>
+        <span>Clear Unused Refund Addresses</span>
       </button>
     </div>
   )

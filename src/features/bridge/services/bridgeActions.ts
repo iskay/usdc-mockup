@@ -14,6 +14,19 @@ import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '
 import { depositForBurnSepolia } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
 
+// Helper function to clear disposable signer (refund address) from Namada extension
+async function clearDisposableSigner(address: string): Promise<void> {
+  try {
+    const namada = (window as any).namada
+    if (namada?.getSigner) {
+      await namada.getSigner().clearDisposableKeypair(address)
+      console.log(`[Refund Cleanup] Cleared disposable signer: ${address}`)
+    }
+  } catch (error) {
+    console.warn(`[Refund Cleanup] Failed to clear disposable signer ${address}:`, error)
+  }
+}
+
 // Helper function to fetch chain ID directly from RPC to avoid SDK dependency
 async function fetchChainIdFromRpcDirect(): Promise<string> {
   const rpcUrl = import.meta.env.VITE_NAMADA_RPC_URL || 'https://rpc.testnet.siuuu.click'
@@ -87,8 +100,10 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
   const gas = await estimateGasForToken(namToken, ['IbcTransfer'], '90000')
   const chain = { chainId, nativeTokenAddress: gas.gasToken }
 
+  // Create a single disposable signer for both wrapper and refund target
   let accountPublicKey = ''
   let ownerAddressForWrapper = transparent
+  let refundTarget: string | undefined
   try {
     const namada: any = (window as any).namada
     const signer = await namada?.getSigner?.()
@@ -96,6 +111,8 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
     if (disposableWrapper?.publicKey && disposableWrapper?.address) {
       accountPublicKey = disposableWrapper.publicKey
       ownerAddressForWrapper = disposableWrapper.address
+      // Use the same address for refund target to ensure we can access refunded funds
+      refundTarget = disposableWrapper.address
     } else {
       accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
     }
@@ -110,14 +127,6 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
     showToast({ title: 'Debug Orbiter', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' })
     return
   }
-
-  let refundTarget: string | undefined
-  try {
-    const namada: any = (window as any).namada
-    const signer = await namada?.getSigner?.()
-    const disposable = await signer?.genDisposableKeypair?.()
-    refundTarget = disposable?.address
-  } catch {}
 
   const result = await buildSignBroadcastUnshieldingIbc(
     { sdk: sdk as any, accountPublicKey, ownerAddress: ownerAddressForWrapper, source: pseudoExtendedKey, receiver, tokenAddress: transferToken, amountInBase, gas, chain, channelId, gasSpendingKey: pseudoExtendedKey, refundTarget, memo },
@@ -158,6 +167,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const txId = `send_${Date.now()}`
   let transactionAdded = false
   let worker: Worker | null = null
+  let refundTarget: string | undefined
 
   try {
     if (state.walletConnections.namada !== 'connected') {
@@ -184,7 +194,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], '90000')
   const chainSett = { chainId, nativeTokenAddress: gas.gasToken }
 
-  // Wrapper signer
+  // Create a single disposable signer for both wrapper and refund target
   let accountPublicKey = ''
   let ownerAddressForWrapper = transparent
   try {
@@ -194,6 +204,8 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     if (disposableWrapper?.publicKey && disposableWrapper?.address) {
       accountPublicKey = disposableWrapper.publicKey
       ownerAddressForWrapper = disposableWrapper.address
+      // Use the same address for refund target to ensure we can access refunded funds
+      refundTarget = disposableWrapper.address
     } else {
       accountPublicKey = (await (sdk as any).rpc.queryPublicKey(transparent)) || ''
     }
@@ -206,15 +218,6 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
   const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
   if (!pseudoExtendedKey) { showToast({ title: 'Send', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' }); return }
-
-  // Optional refund target
-  let refundTarget: string | undefined
-  try {
-    const namada: any = (window as any).namada
-    const signer = await namada?.getSigner?.()
-    const disposable = await signer?.genDisposableKeypair?.()
-    refundTarget = disposable?.address
-  } catch {}
 
   const result = await buildSignBroadcastUnshieldingIbc(
     { sdk: sdk as any, accountPublicKey, ownerAddress: ownerAddressForWrapper, source: pseudoExtendedKey, receiver, tokenAddress: usdcToken, amountInBase, gas, chain: chainSett, channelId, gasSpendingKey: pseudoExtendedKey, memo, refundTarget },
@@ -248,7 +251,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     const sepoliaRpc = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
     const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
     worker = new Worker(new URL('../../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = (ev: MessageEvent) => {
+    worker.onmessage = async (ev: MessageEvent) => {
       const data = ev.data as any
       if (data.type === 'update' && data.id === txId) {
         const changes: any = {}
@@ -262,6 +265,11 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
       } else if (data.type === 'complete' && data.id === txId) {
         if (data.data?.sepoliaHash) {
           dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia', status: 'success' } } })
+          
+          // Clear refund address after successful completion
+          if (refundTarget) {
+            await clearDisposableSigner(refundTarget)
+          }
         }
         worker?.terminate()
         worker = null
@@ -269,6 +277,12 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
         // Handle worker errors
         dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'error', errorMessage: data.error, stage: 'Transaction failed' } } })
         showToast({ title: 'Send Error', message: data.error, variant: 'error' })
+        
+        // Clear refund address on failure
+        if (refundTarget) {
+          await clearDisposableSigner(refundTarget)
+        }
+        
         worker?.terminate()
         worker = null
       }
@@ -318,6 +332,11 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
           stage: 'Transaction failed'
         } 
       } })
+    }
+    
+    // Clear refund address on main transaction failure
+    if (refundTarget) {
+      await clearDisposableSigner(refundTarget)
     }
     
     // Stop any running worker
@@ -583,6 +602,58 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
     showToast({ 
       title: 'Deposit Transaction Failed', 
       message: error?.message || 'An unexpected error occurred', 
+      variant: 'error' 
+    })
+  }
+}
+
+export async function clearUnusedRefundAddressesAction({ showToast }: Deps) {
+  try {
+    const namada = (window as any).namada
+    if (!namada?.getSigner) {
+      showToast({ title: 'Refund Cleanup', message: 'Namada extension not available', variant: 'error' })
+      return
+    }
+
+    const signer = await namada.getSigner()
+    const accounts = await signer.getAccounts()
+    
+    // Find disposable accounts (they typically have specific patterns or are marked as disposable)
+    const disposableAccounts = accounts.filter((account: any) => {
+      // Disposable accounts are typically temporary and have specific characteristics
+      // This is a heuristic - you might need to adjust based on how your app marks disposable accounts
+      return account.type === 'disposable' || account.isDisposable || account.name?.includes('disposable')
+    })
+
+    let clearedCount = 0
+    for (const account of disposableAccounts) {
+      try {
+        await signer.clearDisposableKeypair(account.address)
+        clearedCount++
+        console.log(`[Refund Cleanup] Cleared disposable account: ${account.address}`)
+      } catch (error) {
+        console.warn(`[Refund Cleanup] Failed to clear account ${account.address}:`, error)
+      }
+    }
+
+    if (clearedCount > 0) {
+      showToast({ 
+        title: 'Refund Cleanup', 
+        message: `Cleared ${clearedCount} unused refund address${clearedCount === 1 ? '' : 'es'}`, 
+        variant: 'success' 
+      })
+    } else {
+      showToast({ 
+        title: 'Refund Cleanup', 
+        message: 'No unused refund addresses found', 
+        variant: 'info' 
+      })
+    }
+  } catch (error: any) {
+    console.error('[Refund Cleanup] Error:', error)
+    showToast({ 
+      title: 'Refund Cleanup', 
+      message: error?.message || 'Failed to clear unused refund addresses', 
       variant: 'error' 
     })
   }
