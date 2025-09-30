@@ -122,6 +122,22 @@ The user requested refactoring opportunities in the `BridgeForm.tsx` file to imp
 **Files Modified**:
 - `src/features/bridge/services/bridgeActions.ts` - Fixed extension API usage
 
+### Fixed Shielded Balance Calculation for Current Account
+**Issue**: Shielded balances were always showing the balance of the first account, regardless of which account was currently selected.
+
+**Root Cause**: 
+- The `updateNamadaShieldedBalances` function in `balanceService.ts` was always using the first account with a viewing key
+- It wasn't checking which account was currently selected in `state.addresses.namada.shielded`
+
+**Solution**: 
+- Modified `updateNamadaShieldedBalances` to first look for the account matching the current selected shielded address
+- Added fallback to first account with viewing key if current account not found
+- Added comprehensive logging to track which account is being used for balance calculation
+- Now properly fetches shielded balances for the currently selected account
+
+**Files Modified**:
+- `src/services/balanceService.ts` - Fixed account selection for shielded balance calculation
+
 ## Lessons
 
 ### Security and Architecture

@@ -109,13 +109,27 @@ export function useBalanceService() {
       })()
       const paramsUrl = (import.meta as any)?.env?.VITE_MASP_PARAMS_BASE_URL as string | undefined
       await ensureMaspReady({ sdk: sdk as any, chainId, paramsUrl })
-      // Minimal VK discovery: rely on UI-integrated accounts from Keychain hook
+      // Find the VK matching the currently selected shielded account; fallback to first VK
       const accounts: any[] = await (getNamadaAccounts as any)()
-      const first = (accounts || []).find((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-      if (!first) { try { console.info('[BalanceSvc][shieldedSync] no viewing key found') } catch {}; return }
+      const currentShieldedAddress = state.addresses.namada.shielded
+      let selectedAccount = null
+      if (currentShieldedAddress) {
+        selectedAccount = (accounts || []).find((a) => a?.address === currentShieldedAddress && typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
+        try { console.info('[BalanceSvc][shieldedSync] selected account by address:', currentShieldedAddress.slice(0, 12) + '...') } catch {}
+      }
+      if (!selectedAccount) {
+        selectedAccount = (accounts || []).find((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
+        try { console.info('[BalanceSvc][shieldedSync] using fallback account (first with viewing key)') } catch {}
+      }
+      if (!selectedAccount) { try { console.info('[BalanceSvc][shieldedSync] no viewing key found') } catch {}; return }
+      try {
+        const vk = String(selectedAccount.viewingKey)
+        const vkDisp = vk.length > 24 ? vk.slice(0, 12) + '...' + vk.slice(-8) : vk
+        console.info('[BalanceSvc][shieldedSync] using viewing key:', vkDisp)
+      } catch {}
       await runShieldedSync({
         sdk: sdk as any,
-        viewingKeys: [{ key: String(first.viewingKey), birthday: 0 }],
+        viewingKeys: [{ key: String(selectedAccount.viewingKey), birthday: 0 }],
         chainId,
         onProgress: (p: number) => {
           try { onProgress?.({ step: 'shieldedSyncProgress', data: Math.round(Math.max(0, Math.min(1, p)) * 100) }) } catch {}
@@ -146,15 +160,37 @@ export function useBalanceService() {
         return
       }
       const accounts: any[] = await (getNamadaAccounts as any)()
-      const first = (accounts || []).find((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
-      if (!first) { 
+      
+      // Find the account that matches the current selected shielded address
+      const currentShieldedAddress = state.addresses.namada.shielded
+      let selectedAccount = null
+      
+      if (currentShieldedAddress) {
+        // Try to find the account by shielded address
+        selectedAccount = (accounts || []).find((a) => a?.address === currentShieldedAddress && typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
+        try { console.info('[BalanceSvc][shieldedBalances] looking for account with shielded address:', currentShieldedAddress.slice(0, 12) + '...') } catch {}
+      }
+      
+      // Fallback to first account with viewing key if current account not found
+      if (!selectedAccount) {
+        selectedAccount = (accounts || []).find((a) => typeof a?.viewingKey === 'string' && a.viewingKey.length > 0)
+        try { console.info('[BalanceSvc][shieldedBalances] using fallback account (first with viewing key)') } catch {}
+      }
+      
+      if (!selectedAccount) { 
         try { console.info('[BalanceSvc][shieldedBalances] no viewing key found') } catch {}
         return 
       }
-      try { console.info('[BalanceSvc][shieldedBalances] fetching balances...') } catch {}
+      
+      try {
+        console.info('[BalanceSvc][shieldedBalances] fetching balances using viewing key for account:', selectedAccount.address?.slice(0, 12) + '...')
+        const vk = String(selectedAccount.viewingKey)
+        const vkDisp = vk.length > 24 ? vk.slice(0, 12) + '...' + vk.slice(-8) : vk
+        console.info('[BalanceSvc][shieldedBalances] viewing key:', vkDisp)
+      } catch {}
       const balances = await fetchShieldedBalances(
         sdk as any,
-        String(first.viewingKey),
+        String(selectedAccount.viewingKey),
         tokens,
         chainId
       )
