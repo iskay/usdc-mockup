@@ -1,4 +1,4 @@
-import { encodeFunctionData } from 'viem'
+import { ethers } from 'ethers'
 
 // Chain configuration for gas-less transactions
 export const GASLESS_CHAIN_CONFIG = {
@@ -72,10 +72,10 @@ export function buildDepositForBurnCalldata(
       ],
       outputs: [{ name: 'messageNonce', type: 'uint64' }]
     }
-  ] as const
+  ]
 
   // Convert amount to base units (USDC has 6 decimals)
-  const amountInBase = BigInt(amount) * BigInt(1e6)
+  const amountInBase = ethers.parseUnits(amount, 6)
   
   // Noble domain is 4
   const nobleDomain = 4
@@ -84,16 +84,13 @@ export function buildDepositForBurnCalldata(
   // For now, using a placeholder - you'd need to implement proper address conversion
   const mintRecipient = '0x' + '00'.repeat(32) // Placeholder
   
-  return encodeFunctionData({
-    abi: tokenMessengerAbi,
-    functionName: 'depositForBurn',
-    args: [
-      amountInBase,
-      nobleDomain,
-      mintRecipient as `0x${string}`,
-      chainConfig.usdcAddress as `0x${string}`
-    ]
-  })
+  const iface = new ethers.Interface(tokenMessengerAbi)
+  return iface.encodeFunctionData('depositForBurn', [
+    amountInBase,
+    nobleDomain,
+    mintRecipient,
+    chainConfig.usdcAddress
+  ])
 }
 
 export function isChainSupported(chain: string): boolean {

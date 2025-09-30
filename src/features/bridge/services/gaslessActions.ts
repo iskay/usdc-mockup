@@ -1,7 +1,5 @@
 import { gaslessApiService, type GaslessConfig, type GaslessQuote } from '../../../services/gaslessApiService'
 import { getUserFriendlyError } from '../../../utils/gaslessErrors'
-import { createWalletClient, http, parseUnits, encodeFunctionData } from 'viem'
-import { privateKeyToAccount } from 'viem/accounts'
 import { getChainId, getUSDCAddress, getTokenMessengerAddress, buildDepositForBurnCalldata } from './gaslessUtils'
 
 // Chain configuration for gas-less transactions
