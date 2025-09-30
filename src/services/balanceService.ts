@@ -67,18 +67,23 @@ export function useBalanceService() {
   }
 
   const updateEvmUsdc = async () => {
-    try { console.info('[BalanceSvc][evmUsdc] start') } catch {}
+    try { console.info('[BalanceSvc][evmUsdc] start (external RPC)') } catch {}
     const chain = 'sepolia'
     const usdc = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
-    if (!(window as any).ethereum || !usdc) return
-    const provider = new ethers.BrowserProvider((window as any).ethereum)
-    const signer = await provider.getSigner()
-    const addr = await signer.getAddress()
+    const rpcUrl = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
+    if (!usdc || !rpcUrl) return
+    // Prefer address from state (set during MetaMask connect); do not depend on extension focus
+    const addr = (state.addresses as any)?.[chain]
+    if (!addr || typeof addr !== 'string' || addr.length < 42) {
+      try { console.info('[BalanceSvc][evmUsdc] no EVM address in state for', chain) } catch {}
+      return
+    }
+    const provider = new ethers.JsonRpcProvider(rpcUrl)
     const c = new ethers.Contract(usdc, ['function balanceOf(address) view returns (uint256)'], provider)
     const bal = await c.balanceOf(addr)
     const formatted = new BigNumber(ethers.formatUnits(bal, 6)).toFixed(6)
     dispatch({ type: 'MERGE_BALANCES', payload: { [chain]: { usdc: formatted } } })
-    try { console.info('[BalanceSvc][evmUsdc] done', formatted) } catch {}
+    try { console.info('[BalanceSvc][evmUsdc] done (external RPC)', formatted) } catch {}
   }
 
   const updateNamadaTransparent = async (token: 'usdc' | 'nam') => {

@@ -653,7 +653,7 @@ export const BridgeForm: React.FC = () => {
           </div>
 
           {/* NAM balance rows */}
-          <div className="flex justify-start items-center gap-4 pt-4">
+          {/* <div className="flex justify-start items-center gap-4 pt-4">
             <div className="label-text mb-0 w-24 text-left">Transparent:</div>
             <div className="flex gap-2 items-center">
               <img src="/namada-logo.svg" alt="NAM" className="h-5 w-5" />
@@ -702,7 +702,7 @@ export const BridgeForm: React.FC = () => {
               <div className="leading-none tracking-wide font-semibold text-[#e7bc59]">{state.balances.namada.namShielded} NAM</div>
               {state.isShieldedBalanceComputing && <Spinner size="sm" variant="accent" />}
             </div>
-          </div>
+          </div> */}
 
           {/* Info text */}
           <div className="info-text font-normal flex justify-center items-center gap-2 mt-12">
