@@ -453,6 +453,7 @@ export const BridgeForm: React.FC = () => {
           isMetaMaskConnected={state.walletConnections.metamask === 'connected'}
           onStartSepoliaDeposit={() => startSepoliaDeposit()}
           onStartDepositSimulation={() => console.log("Simulate Deposit placeholder")}
+          getNamadaAccounts={getNamadaAccounts}
         /> : <SendSection 
           chain={chain}
           setChain={setChain}

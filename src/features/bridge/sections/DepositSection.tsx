@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { PixelRow } from '../../../components/layout/Pixels'
 import { SelectMenu } from '../../../components/ui/SelectMenu'
 import { Input } from '../../../components/ui/Input'
@@ -11,6 +11,8 @@ import { useToast } from '../../../components/ui/Toast'
 import { chains } from '../config'
 import { validateAmount, validateForm } from '../utils/validation'
 import { getNamadaTxExplorerUrl } from '../../../utils/explorer'
+import { GaslessToggle } from '../components/GaslessToggle'
+import { startGaslessDepositAction } from '../services/gaslessActions'
 
 type Props = {
   chain: string
@@ -25,6 +27,7 @@ type Props = {
   isMetaMaskConnected: boolean
   onStartSepoliaDeposit: () => void | Promise<void>
   onStartDepositSimulation: () => void | Promise<void>
+  getNamadaAccounts: () => Promise<readonly any[]>
 }
 
 const shorten = (addr: string) => (addr?.length > 10 ? `${addr.slice(0, 6)}...${addr.slice(-4)}` : addr)
@@ -42,9 +45,15 @@ const DepositSection: React.FC<Props> = ({
   isMetaMaskConnected,
   onStartSepoliaDeposit,
   onStartDepositSimulation,
+  getNamadaAccounts,
 }) => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
+  const [gaslessEnabled, setGaslessEnabled] = useState(false)
+
+  // Check if gas-less is supported for this chain
+  const supportedChains = ['base', 'ethereum', 'arbitrum', 'polygon']
+  const showGaslessOption = supportedChains.includes(chain) && isMetaMaskConnected
 
   return (
     <div className="space-y-6 text-left">
@@ -129,6 +138,18 @@ const DepositSection: React.FC<Props> = ({
           ))}
         </div>
       </div>
+
+      {/* Gas-less Toggle - only show for supported EVM chains */}
+      {showGaslessOption && (
+        <GaslessToggle
+          enabled={gaslessEnabled}
+          onToggle={setGaslessEnabled}
+          chain={chain}
+          amount={depositAmount}
+          userAddress={(state.addresses as any)[chain]}
+          availableBalance={availableBalance}
+        />
+      )}
 
       <div>
         <div className="flex items-baseline justify-between">
@@ -225,8 +246,23 @@ const DepositSection: React.FC<Props> = ({
               <Button
                 variant="submit"
                 disabled={!validation.isValid || !isMetaMaskConnected}
-                onClick={() => {
-                  if (chain === 'sepolia') {
+                onClick={async () => {
+                  if (gaslessEnabled) {
+                    // Execute gas-less deposit action
+                    await startGaslessDepositAction({
+                      sdk: null, // Not needed for gas-less transactions
+                      state,
+                      dispatch,
+                      showToast,
+                      getNamadaAccounts
+                    }, {
+                      chain,
+                      amount: depositAmount,
+                      destinationAddress: depositAddress,
+                      validateForm,
+                      getAvailableBalance: () => availableBalance
+                    })
+                  } else if (chain === 'sepolia') {
                     void onStartSepoliaDeposit()
                   } else {
                     onStartDepositSimulation()
@@ -234,7 +270,7 @@ const DepositSection: React.FC<Props> = ({
                 }}
                 leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
               >
-                Deposit USDC
+                {gaslessEnabled ? 'Transfer with USDC' : 'Deposit USDC'}
               </Button>
             </div>
           )
