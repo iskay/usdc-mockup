@@ -28,6 +28,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   const { fetchBalances } = useBalanceService()
   const hasInProgressTx = state.transactions.some(tx => tx.status === 'submitting' || tx.status === 'pending')
   const [openConnect, setOpenConnect] = useState(false)
+  const [showHelpModal, setShowHelpModal] = useState(false)
   const connectRef = useRef<HTMLDivElement | null>(null)
   const hasAutoReconnected = useRef(false)
   const addressesRef = useRef(state.addresses)
@@ -47,7 +48,14 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
       }
     }
     document.addEventListener('mousedown', onDocClick)
-    return () => document.removeEventListener('mousedown', onDocClick)
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowHelpModal(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKeyDown)
+    }
   }, [])
 
   // --- MetaMask + Namada integration ---
@@ -304,6 +312,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
   }
 
   return (
+    <>
     <header className="sticky top-0 z-40 flex h-20 items-center bg-header-bg justify-between px-16 border-b-2 border-header-border">
       {/* Left side - Logo and Navigation */}
       <div className="flex items-center justify-between gap-8 w-full">
@@ -318,11 +327,9 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           <Button
             variant="help"
             size="xs"
-            onClick={() =>
-              showToast({ title: 'Help', message: 'Visit the docs or contact support.', variant: 'info' })
-            }
+            onClick={() => setShowHelpModal(true)}
           >
-            Help
+            More Info
           </Button>
                       {nav.map((n) => {
               const isHistory = n.key === 'history'
@@ -407,6 +414,47 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         </nav>
       </div>
     </header>
+    {showHelpModal ? (
+      <div className="fixed inset-0 z-[1000] flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50" onClick={() => setShowHelpModal(false)} />
+        <div className="relative z-[1001] w-full max-w-2xl mx-4 rounded-2xl border border-border-muted bg-card shadow-xl">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border-muted">
+            <h2 className="text-lg font-semibold">How to use this app</h2>
+            <button
+              type="button"
+              onClick={() => setShowHelpModal(false)}
+              className="text-muted-fg hover:text-foreground"
+              aria-label="Close"
+            >
+              <i className="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div className="px-5 py-5 max-h-[70vh] overflow-auto text-foreground">
+            {/* Placeholder rich content; update as needed */}
+            <h1 className="text-xl font-bold mb-2">Welcome to USDC.delivery</h1>
+            <p className="mb-3">
+              This modal supports basic markup elements like <span className="font-semibold">headings</span>,
+              <span> paragraphs</span>, and inline <span className="italic">spans</span>.
+            </p>
+            <p className="mb-3">
+              Example flow:
+            </p>
+            <ol className="list-decimal pl-5 space-y-1 text-sm">
+              <li>Connect MetaMask and Namada Keychain.</li>
+              <li>Deposit USDC to Namada or Send privately from Namada to EVM.</li>
+              <li>Use “Shielded Sync” to refresh shielded balances.</li>
+            </ol>
+            <p className="mt-4 text-sm text-muted-fg">
+              Replace this content in <code>Header.tsx</code> with your own documentation.
+            </p>
+          </div>
+          <div className="px-5 py-4 border-t border-border-muted flex justify-end">
+            <Button variant="secondary" onClick={() => setShowHelpModal(false)}>Close</Button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   )
 }
 
