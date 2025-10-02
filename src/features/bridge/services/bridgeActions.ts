@@ -6,12 +6,13 @@ import { getNAMAddressFromRegistry } from '../../../utils/namadaBalance'
 import { estimateGasForToken } from '../utils/gas'
 import { buildSignBroadcastUnshieldingIbc } from '../../../utils/txUnshieldIbc'
 import { getNamadaTxExplorerUrl } from '../../../utils/explorer'
+import { formatStageWithChain } from '../../../utils/chain'
 import { getPhaseMessage } from '../utils/txMessages'
 import { evmHex20ToBase64_32 } from '../../../utils/ibcMemo'
 import { getUSDCAddressFromRegistry, getAssetDecimalsByDisplay } from '../../../utils/namadaBalance'
 import { fetchLatestHeight } from '../../../utils/noblePoller'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../../utils/txShield'
-import { depositForBurnSepolia } from '../../../utils/evmCctp'
+import { depositForBurn } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
 
 // Helper function to clear disposable signer (refund address) from Namada extension
@@ -248,8 +249,11 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
     const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
     const startHeight = (await fetchLatestHeight(nobleRpc)) + 1
     const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
-    const sepoliaRpc = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
-    const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
+    // Resolve EVM chain polling inputs from config
+    const { getPrimaryRpcUrl, getUsdcAddress, getChainDisplayName } = await import('../../../utils/chain')
+    const evmRpc = getPrimaryRpcUrl(inputs.destinationChain)
+    const evmUsdc = getUsdcAddress(inputs.destinationChain)
+    const evmName = getChainDisplayName(inputs.destinationChain)
     worker = new Worker(new URL('../../../workers/OrbiterTxWorker.ts', import.meta.url), { type: 'module' })
     worker.onmessage = async (ev: MessageEvent) => {
       const data = ev.data as any
@@ -257,14 +261,17 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
         const changes: any = {}
         if (data.data.stage) changes.stage = data.data.stage
         if (data.data.status) changes.status = data.data.status
-        if (data.data.sepoliaHash) changes.sepoliaHash = data.data.sepoliaHash
+        if (data.data.sepoliaHash) {
+          changes.sepoliaHash = data.data.sepoliaHash
+          changes.evm = { chain: inputs.destinationChain, hash: data.data.sepoliaHash }
+        }
         if (data.data.errorMessage) changes.errorMessage = data.data.errorMessage
         if (Object.keys(changes).length > 0) {
           dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes } })
         }
       } else if (data.type === 'complete' && data.id === txId) {
         if (data.data?.sepoliaHash) {
-          dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, stage: 'Minted on Sepolia', status: 'success' } } })
+          dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { sepoliaHash: data.data.sepoliaHash, evm: { chain: inputs.destinationChain, hash: data.data.sepoliaHash }, stage: formatStageWithChain('Minted on Sepolia', inputs.destinationChain), status: 'success' } } })
           
           // Clear refund address after successful completion
           if (refundTarget) {
@@ -304,14 +311,16 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
           timeoutMs: 5 * 60 * 1000,
           intervalMs: 5000,
         },
-        sepolia: {
-          rpcUrl: sepoliaRpc,
-          usdcAddress: usdcAddr,
+        evm: evmRpc && evmUsdc ? {
+          chainKey: inputs.destinationChain,
+          chainName: evmName,
+          rpcUrl: evmRpc,
+          usdcAddress: evmUsdc,
           recipient: inputs.destinationAddress,
           amountBaseUnits: amountInBase.toString(),
           timeoutMs: 5 * 60 * 1000,
           intervalMs: 5000,
-        },
+        } : undefined,
       }
     })
   } catch (e) {
@@ -490,7 +499,7 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
   }
 }
 
-export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: Deps, inputs: DepositInputs) {
+export async function startEvmDepositAction({ sdk, dispatch, showToast }: Deps, inputs: DepositInputs & { chainKey: string }) {
   const txId = inputs.txId || `dep_${Date.now()}`
   
   try {
@@ -510,7 +519,7 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
       id: txId,
       kind: 'deposit',
       amount: inputs.amount,
-      fromChain: 'sepolia',
+      fromChain: inputs.chainKey,
       toChain: 'namada',
       destination: inputs.destinationAddress,
       status: 'submitting',
@@ -549,23 +558,17 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
   const mintRecipient = encodeBech32ToBytes32(forwardingAddress)
   console.log('   ✅ Encoded bytes32:', mintRecipient)
   
-  const tokenMessenger = (import.meta as any)?.env?.VITE_SEPOLIA_TOKEN_MESSENGER as string
-  const usdcAddr = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
   const destinationDomain = Number((import.meta as any)?.env?.VITE_NOBLE_DOMAIN_ID ?? 4)
   
-  console.log('📋 Contract addresses:')
-  console.log('   TokenMessenger:', tokenMessenger)
-  console.log('   USDC:', usdcAddr)
+  console.log('📋 Deposit parameters:')
+  console.log('   Chain:', inputs.chainKey)
+  console.log('   Amount:', inputs.amount)
   console.log('   Destination Domain:', destinationDomain)
-  
-  if (!tokenMessenger) throw new Error('VITE_SEPOLIA_TOKEN_MESSENGER not set')
-  if (!usdcAddr) throw new Error('VITE_USDC_SEPOLIA not set')
 
-  const { txHash } = await depositForBurnSepolia({
+  const { txHash } = await depositForBurn({
+    chainKey: inputs.chainKey,
     amountUsdc: inputs.amount,
     forwardingAddressBytes32: mintRecipient,
-    usdcAddress: usdcAddr,
-    tokenMessengerAddress: tokenMessenger,
     destinationDomain,
   })
 
@@ -624,6 +627,10 @@ export async function startSepoliaDepositAction({ sdk, dispatch, showToast }: De
     })
   }
 }
+
+// Backward compatibility export
+export const startSepoliaDepositAction = (deps: Deps, inputs: DepositInputs) => 
+  startEvmDepositAction(deps, { ...inputs, chainKey: 'sepolia' })
 
 export async function clearUnusedRefundAddressesAction({ showToast }: Deps) {
   try {

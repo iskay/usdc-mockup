@@ -1,5 +1,6 @@
 import { ethers } from 'ethers'
 import { USDC_ABI, TOKEN_MESSENGER_ABI } from './evmCctp'
+import { getCctpDomain } from './chain'
 
 export type EvmFeeEstimate = {
   approveUsd: number
@@ -12,6 +13,7 @@ export async function estimateDepositFeesUSD(params: {
   amountUsdc: string
   usdcAddress: string
   tokenMessengerAddress: string
+  chainKey?: string
 }): Promise<EvmFeeEstimate> {
   if (!window.ethereum) throw new Error('MetaMask not available')
   try { console.info('[FeeEst] Starting EVM fee estimation', params) } catch {}
@@ -65,7 +67,9 @@ export async function estimateDepositFeesUSD(params: {
       try { console.info('[FeeEst] skipping approve gas estimate (no signer)') } catch {}
     }
   } catch (e) {
-    try { console.warn('[FeeEst] approve gas estimate failed', e) } catch {}
+    try { console.warn('[FeeEst] approve gas estimate failed, using fallback', e) } catch {}
+    // Fallback gas estimate for approve transaction
+    approveGas = 50000n
   }
 
   // 2) depositForBurn estimate (rough; we cannot include dynamic mintRecipient here)
@@ -74,6 +78,7 @@ export async function estimateDepositFeesUSD(params: {
     if (signer && wallet) {
       const tokenMessenger = new ethers.Contract(params.tokenMessengerAddress, TOKEN_MESSENGER_ABI, signer)
       // Dummy values for estimation; downstream UI calls use accurate execution path.
+      const cctpDomain = params.chainKey ? getCctpDomain(params.chainKey) : 4 // fallback to noble domain
       const estimateTx = await tokenMessenger.depositForBurn.populateTransaction(
         1n, // minimal non-zero amount for estimation
         4, // noble domain default
@@ -92,7 +97,9 @@ export async function estimateDepositFeesUSD(params: {
       try { console.info('[FeeEst] skipping burn gas estimate (no signer)') } catch {}
     }
   } catch (e) {
-    try { console.warn('[FeeEst] burn gas estimate failed', e) } catch {}
+    try { console.warn('[FeeEst] burn gas estimate failed, using fallback', e) } catch {}
+    // Fallback gas estimate for depositForBurn transaction
+    burnGas = 200000n
   }
 
   // Convert to USD using Sepolia ETH price assumption via on-chain gas price and a fixed ETH price.

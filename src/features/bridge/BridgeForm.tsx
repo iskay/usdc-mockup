@@ -21,14 +21,22 @@ import { useShieldFeeEstimate } from './hooks/useShieldFeeEstimate'
 import MoreActionsMenu from './MoreActionsMenu'
 import DepositSection from './sections/DepositSection'
 import SendSection from './sections/SendSection'
-import { debugOrbiterAction, clearShieldedContextAction, clearTxHistoryAction, sendNowViaOrbiterAction, shieldNowForTokenAction, startSepoliaDepositAction, connectNamadaAction, clearUnusedRefundAddressesAction } from './services/bridgeActions'
+import { debugOrbiterAction, clearShieldedContextAction, clearTxHistoryAction, sendNowViaOrbiterAction, shieldNowForTokenAction, startEvmDepositAction, connectNamadaAction, clearUnusedRefundAddressesAction } from './services/bridgeActions'
 
 export const BridgeForm: React.FC = () => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
   const { fetchBalances } = useBalanceService()
   const [activeTab, setActiveTab] = useState('deposit')
-  const [chain, setChain] = useState('sepolia')
+  const [chain, setChain] = useState(() => {
+    // Use default from config, fallback to 'sepolia' if config not loaded yet
+    try {
+      const { getDefaultChain } = require('./config')
+      return getDefaultChain()
+    } catch {
+      return 'sepolia'
+    }
+  })
   const [depositAmount, setDepositAmount] = useState('')
   const [depositAddress, setDepositAddress] = useState('')
   const [sendAmount, setSendAmount] = useState('')
@@ -73,9 +81,17 @@ export const BridgeForm: React.FC = () => {
   // Minimal trigger: on MetaMask connect update balances (evm + namada transparent)
   useEffect(() => {
     if (state.walletConnections.metamask === 'connected') {
-      void fetchBalances({ kinds: ['evmUsdc', 'namadaTransparentUsdc', 'namadaTransparentNam'], delayMs: 250 })
+      void fetchBalances({ kinds: ['evmUsdc', 'namadaTransparentUsdc', 'namadaTransparentNam'], delayMs: 250, chainKey: chain })
     }
   }, [state.walletConnections.metamask])
+
+  // Fetch EVM balance when chain selection changes
+  useEffect(() => {
+    if (state.walletConnections.metamask === 'connected' && chain !== 'namada') {
+      console.log('[BridgeForm] Chain changed, fetching balance for:', chain)
+      void fetchBalances({ kinds: ['evmUsdc'], delayMs: 100, chainKey: chain })
+    }
+  }, [chain, state.walletConnections.metamask])
 
   // Clear Namada-related local state when disconnecting
   useEffect(() => {
@@ -230,12 +246,13 @@ export const BridgeForm: React.FC = () => {
       const txId = currentDepositTxIdRef.current || `dep_${Date.now()}`
       if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
       
-      await startSepoliaDepositAction(
+      await startEvmDepositAction(
         { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
         {
           amount: depositAmount,
           destinationAddress: depositAddress,
           chain,
+          chainKey: chain, // Pass the selected chain as chainKey
           getAvailableBalance,
           validateForm,
           txId
@@ -247,7 +264,7 @@ export const BridgeForm: React.FC = () => {
         if (txId) {
           dispatch({
             type: 'UPDATE_TRANSACTION',
-            payload: { id: txId, changes: { status: 'error', errorMessage: err?.message ?? 'Sepolia depositForBurn failed' } },
+            payload: { id: txId, changes: { status: 'error', errorMessage: err?.message ?? 'EVM depositForBurn failed' } },
           })
         }
       } catch {}
@@ -451,7 +468,7 @@ export const BridgeForm: React.FC = () => {
           depositFeeEst={depositFeeEst}
           availableBalance={getAvailableBalance(chain)}
           isMetaMaskConnected={state.walletConnections.metamask === 'connected'}
-          onStartSepoliaDeposit={() => startSepoliaDeposit()}
+          onStartEvmDeposit={() => startSepoliaDeposit()}
           onStartDepositSimulation={() => console.log("Simulate Deposit placeholder")}
           getNamadaAccounts={getNamadaAccounts}
         /> : <SendSection 

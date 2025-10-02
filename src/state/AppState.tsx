@@ -35,6 +35,7 @@ export type Transaction = {
   stage?: string
   namadaHash?: string
   sepoliaHash?: string
+  evm?: { chain: string; hash: string }
   nobleAckFound?: boolean
   nobleCctpFound?: boolean
   namadaChainId?: string

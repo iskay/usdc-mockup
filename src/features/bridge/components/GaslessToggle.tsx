@@ -28,7 +28,7 @@ export const GaslessToggle: React.FC<GaslessToggleProps> = ({
 
   // Check if user has enough USDC for gas-less transaction
   const hasEnoughUsdc = parseFloat(availableBalance) >= parseFloat(totalUsdcNeeded)
-  const isDisabled = isLoading || error || !hasEnoughUsdc
+  const isDisabled = Boolean(isLoading || error || !hasEnoughUsdc)
 
   return (
     <div className="border rounded-lg p-4 bg-gray-50 dark:bg-gray-800">

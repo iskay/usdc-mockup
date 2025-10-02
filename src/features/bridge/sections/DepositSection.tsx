@@ -8,9 +8,11 @@ import InlineHash from '../../../components/ui/InlineHash'
 import InlineAddress from '../../../components/ui/InlineAddress'
 import { useAppState } from '../../../state/AppState'
 import { useToast } from '../../../components/ui/Toast'
-import { chains } from '../config'
+import { getChainOptions } from '../config'
+import { useEvmConfig } from '../../../state/EvmConfigProvider'
 import { validateAmount, validateForm } from '../utils/validation'
 import { getNamadaTxExplorerUrl } from '../../../utils/explorer'
+import { getEvmTxUrl, getChainDisplayName } from '../../../utils/chain'
 import { GaslessToggle } from '../components/GaslessToggle'
 import { startGaslessDepositAction } from '../services/gaslessActions'
 
@@ -25,7 +27,7 @@ type Props = {
   depositFeeEst: string | null
   availableBalance: string
   isMetaMaskConnected: boolean
-  onStartSepoliaDeposit: () => void | Promise<void>
+  onStartEvmDeposit: () => void | Promise<void>
   onStartDepositSimulation: () => void | Promise<void>
   getNamadaAccounts: () => Promise<readonly any[]>
 }
@@ -43,13 +45,17 @@ const DepositSection: React.FC<Props> = ({
   depositFeeEst,
   availableBalance,
   isMetaMaskConnected,
-  onStartSepoliaDeposit,
+  onStartEvmDeposit,
   onStartDepositSimulation,
   getNamadaAccounts,
 }) => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
+  const { config } = useEvmConfig()
   const [gaslessEnabled, setGaslessEnabled] = useState(false)
+  
+  // Generate chains dynamically from config
+  const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
 
   // Check if gas-less is supported for this chain
   const supportedChains = ['base', 'ethereum', 'arbitrum', 'polygon']
@@ -119,6 +125,8 @@ const DepositSection: React.FC<Props> = ({
                         ...state.addresses,
                         ethereum: account,
                         base: account,
+                        polygon: account,
+                        arbitrum: account,
                         sepolia: account,
                       },
                     })
@@ -262,10 +270,8 @@ const DepositSection: React.FC<Props> = ({
                       validateForm,
                       getAvailableBalance: () => availableBalance
                     })
-                  } else if (chain === 'sepolia') {
-                    void onStartSepoliaDeposit()
                   } else {
-                    onStartDepositSimulation()
+                    void onStartEvmDeposit()
                   }
                 }}
                 leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
@@ -293,8 +299,8 @@ const DepositSection: React.FC<Props> = ({
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{depositAmount} USDC</span></div>
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground"><InlineAddress value={depositAddress} /></span></div>
                 <div className="flex justify-between"><span>On</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label} → Namada</span></div>
-                <div className="flex justify-between"><span>Sepolia Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  <InlineHash value={latestDepositTx?.sepoliaHash as string | undefined} explorerUrl={latestDepositTx?.sepoliaHash ? `https://sepolia.etherscan.io/tx/${latestDepositTx.sepoliaHash}` : undefined} />
+                <div className="flex justify-between"><span>{getChainDisplayName(chain)} Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  <InlineHash value={latestDepositTx?.sepoliaHash as string | undefined} explorerUrl={latestDepositTx?.sepoliaHash ? getEvmTxUrl(chain, latestDepositTx.sepoliaHash) : undefined} />
                 </span></div>
                 <div className="flex justify-between"><span>Namada Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
                   <InlineHash

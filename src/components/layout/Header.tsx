@@ -78,6 +78,8 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             ...addressesRef.current,
             ethereum: account,
             base: account,
+            polygon: account,
+            arbitrum: account,
             sepolia: account,
           }
           console.log('Dispatching SET_ADDRESSES with:', newAddresses)
@@ -153,6 +155,8 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             ...addressesRef.current,
             ethereum: '',
             base: '',
+            polygon: '',
+            arbitrum: '',
             sepolia: '',
           },
         })
@@ -178,6 +182,8 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             ...addressesRef.current,
             ethereum: account,
             base: account,
+            polygon: account,
+            arbitrum: account,
             sepolia: account,
           },
         })
@@ -218,6 +224,8 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             ...addressesRef.current,
             ethereum: account,
             base: account,
+            polygon: account,
+            arbitrum: account,
             sepolia: account,
           },
         })

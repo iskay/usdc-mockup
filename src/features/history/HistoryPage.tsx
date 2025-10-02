@@ -2,6 +2,7 @@ import React from 'react'
 import { Card, CardHeader, CardTitle } from '../../components/ui/Card'
 import { useAppState } from '../../state/AppState'
 import { getNamadaTxExplorerUrl } from '../../utils/explorer'
+import { getEvmTxUrl, getEvmAddressUrl, getChainDisplayName } from '../../utils/chain'
 import Spinner from '../../components/ui/Spinner'
 
 export const HistoryPage: React.FC = () => {
@@ -45,7 +46,10 @@ export const HistoryPage: React.FC = () => {
                       {tx.destination ? (
                         <div className="flex justify-between"><span>Destination</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.destination}
                           <button onClick={() => { navigator.clipboard.writeText(tx.destination as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
-                          <button onClick={() => window.open(`https://sepolia.etherscan.io/address/${tx.destination}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                          <button onClick={() => {
+                            const url = getEvmAddressUrl('sepolia', tx.destination as string)
+                            if (url) window.open(url, '_blank')
+                          }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                         </span></div>
                       ) : null}
                       {tx.stage ? <div className="flex justify-between"><span>Stage</span><span className="text-foreground font-medium">{tx.stage}</span></div> : null}
@@ -61,9 +65,12 @@ export const HistoryPage: React.FC = () => {
                         </span></div>
                       ) : null}
                       {tx.sepoliaHash ? (
-                        <div className="flex justify-between"><span>Sepolia Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.sepoliaHash}
+                        <div className="flex justify-between"><span>{getChainDisplayName('sepolia')} Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.sepoliaHash}
                           <button onClick={() => { navigator.clipboard.writeText(tx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
-                          <button onClick={() => window.open(`https://sepolia.etherscan.io/tx/${tx.sepoliaHash}`, '_blank')} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
+                          <button onClick={() => {
+                            const url = getEvmTxUrl('sepolia', tx.sepoliaHash as string)
+                            if (url) window.open(url, '_blank')
+                          }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                         </span></div>
                       ) : null}
                       <div className="flex justify-between"><span>Status</span><span className="text-foreground font-medium">{tx.status}</span></div>

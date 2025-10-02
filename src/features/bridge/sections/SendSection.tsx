@@ -7,9 +7,11 @@ import { Button } from '../../../components/ui/Button'
 import Spinner from '../../../components/ui/Spinner'
 import InlineHash from '../../../components/ui/InlineHash'
 import InlineAddress from '../../../components/ui/InlineAddress'
-import { chains } from '../config'
+import { getChainOptions } from '../config'
+import { useEvmConfig } from '../../../state/EvmConfigProvider'
 import { validateAmount, validateForm } from '../utils/validation'
 import { getNamadaTxExplorerUrl } from '../../../utils/explorer'
+import { getEvmTxUrl, getEvmAddressUrl, getChainDisplayName } from '../../../utils/chain'
 
 type Props = {
   chain: string
@@ -52,6 +54,11 @@ const SendSection: React.FC<Props> = ({
   autoFillDisabled,
   onClickAutoFill,
 }) => {
+  const { config } = useEvmConfig()
+  
+  // Generate chains dynamically from config
+  const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
+  
   // Calculate available amount by subtracting gas fees from shielded balance
   const calculateAvailableAmount = () => {
     if (availableShielded === '--' || !sendFeeEst) {
@@ -221,7 +228,7 @@ const SendSection: React.FC<Props> = ({
           <div className="mt-4 space-y-4">
             <div className="rounded-xl border border-border-muted bg-card p-4">
               <div className="flex items-center gap-2 mb-2">
-                {latestSendTx?.stage === 'Minted on Sepolia' ? (
+                {latestSendTx?.stage?.includes('Minted on') ? (
                   <i className="fa-solid fa-check-circle text-accent-green"></i>
                 ) : (
                   <Spinner size="sm" variant="accent" />
@@ -230,12 +237,12 @@ const SendSection: React.FC<Props> = ({
               </div>
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{sendAmount} USDC</span></div>
-                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground flex items-center gap-2"><InlineAddress value={sendAddress} explorerUrl={`https://sepolia.etherscan.io/address/${sendAddress}`} /></span></div>
+                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground flex items-center gap-2"><InlineAddress value={sendAddress} explorerUrl={getEvmAddressUrl(chain, sendAddress)} /></span></div>
                 <div className="flex justify-between"><span>Namada Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
                   <InlineHash value={latestSendTx?.namadaHash as string | undefined} explorerUrl={latestSendTx?.namadaHash ? getNamadaTxExplorerUrl(String(latestSendTx.namadaChainId || ''), latestSendTx.namadaHash as string) : undefined} />
                 </span></div>
-                <div className="flex justify-between"><span>Sepolia Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  <InlineHash value={latestSendTx?.sepoliaHash as string | undefined} explorerUrl={latestSendTx?.sepoliaHash ? `https://sepolia.etherscan.io/tx/${latestSendTx.sepoliaHash}` : undefined} />
+                <div className="flex justify-between"><span>{getChainDisplayName(chain)} Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  <InlineHash value={latestSendTx?.sepoliaHash as string | undefined} explorerUrl={latestSendTx?.sepoliaHash ? getEvmTxUrl(chain, latestSendTx.sepoliaHash) : undefined} />
                 </span></div>
               </div>
             </div>

@@ -67,7 +67,7 @@ export function createTxService(dispatch: (action: any) => void) {
     pollingJobs.set(ctx.txId, abort)
     try {
       // Set initial stage
-      dispatch({ type: 'SET_TRANSACTION_STAGE', payload: { id: ctx.txId, stage: 'Burned on Sepolia' } })
+      dispatch({ type: 'SET_TRANSACTION_STAGE', payload: { id: ctx.txId, stage: 'Burned on EVM' } })
       dispatch({ type: 'SET_TRANSACTION_STATUS', payload: { id: ctx.txId, status: 'pending' } })
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: ctx.txId, changes: { sepoliaHash: ctx.sepoliaHash } } })
 
@@ -99,7 +99,7 @@ export function createTxService(dispatch: (action: any) => void) {
 
       // Handle Noble timeout / partial progress
       if (!nobleRes.receivedFound) {
-        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: ctx.txId, changes: { status: 'error', errorMessage: 'Timeout waiting for Noble deposit (coin_received). The Sepolia transaction may have failed or not been recognized.' } } })
+        dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: ctx.txId, changes: { status: 'error', errorMessage: 'Timeout waiting for Noble deposit (coin_received). The EVM transaction may have failed or not been recognized.' } } })
         return
       }
       if (!nobleRes.forwardFound) {

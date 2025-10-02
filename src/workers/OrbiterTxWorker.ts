@@ -1,4 +1,4 @@
-// Dedicated worker per transaction to poll Noble and Sepolia without interfering with other txs
+// Dedicated worker per transaction to poll Noble and EVM chain without interfering with other txs
 export type StartParams = {
   id: string
   noble: {
@@ -14,7 +14,10 @@ export type StartParams = {
     timeoutMs: number
     intervalMs: number
   }
-  sepolia?: {
+  evm?: {
+    // Generic EVM polling params (was Sepolia-specific)
+    chainKey?: string
+    chainName?: string
     rpcUrl: string
     usdcAddress: string
     recipient: string
@@ -88,7 +91,7 @@ async function postRpc(rpcUrl: string, body: any): Promise<any> {
   return res.json()
 }
 
-async function pollSepolia(params: NonNullable<StartParams['sepolia']>): Promise<{ found: boolean; txHash?: string }> {
+async function pollEvm(params: NonNullable<StartParams['evm']>): Promise<{ found: boolean; txHash?: string }> {
   const endAt = Date.now() + params.timeoutMs
   let fromBlock: number | null = null
   while (Date.now() < endAt) {
@@ -130,10 +133,10 @@ async function pollSepolia(params: NonNullable<StartParams['sepolia']>): Promise
 self.onmessage = async (e: MessageEvent) => {
   const msg = e.data as { type: 'start'; payload: StartParams }
   if (msg.type !== 'start') return
-  const { id, noble, sepolia } = msg.payload
+  const { id, noble, evm } = msg.payload
   try {
     const upd = (u: { ack?: boolean; cctp?: boolean }) => {
-      const stage = u.cctp ? 'Forwarding to Sepolia via CCTP' : undefined
+      const stage = u.cctp ? `Forwarding to ${evm?.chainName ?? 'EVM'} via CCTP` : undefined
       self.postMessage({ type: 'update', id, data: { stage, nobleAckFound: !!u.ack, nobleCctpFound: !!u.cctp } } as WorkerEvent)
     }
     const nres = await pollNoble(noble, upd)
@@ -141,8 +144,8 @@ self.onmessage = async (e: MessageEvent) => {
       self.postMessage({ type: 'complete', id, data: {} } as WorkerEvent)
       return
     }
-    if (sepolia) {
-      const eres = await pollSepolia(sepolia)
+    if (evm) {
+      const eres = await pollEvm(evm)
       if (eres.found) {
         self.postMessage({ type: 'complete', id, data: { sepoliaHash: eres.txHash } } as WorkerEvent)
       } else {

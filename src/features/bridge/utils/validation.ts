@@ -18,7 +18,7 @@ export const validateAmount = (amount: string, availableBalance: string): Amount
 
 export const validateForm = (amount: string, availableBalance: string, address: string): FormValidation => {
   const amountValidation = validateAmount(amount, availableBalance)
-  const hasAddress = address && address.trim() !== ''
+  const hasAddress = Boolean(address && address.trim() !== '')
   return {
     isValid: amountValidation.isValid && hasAddress,
     amountError: amountValidation.error,

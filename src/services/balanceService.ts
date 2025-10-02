@@ -1,5 +1,6 @@
 import { ethers } from 'ethers'
 import BigNumber from 'bignumber.js'
+import { getUsdcAddress, getPrimaryRpcUrl } from '../utils/chain'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getNamadaUSDCBalance, getNamadaNAMBalance } from '../utils/namadaBalance'
 import { ensureMaspReady, runShieldedSync } from '../utils/shieldedSync'
 import { fetchShieldedBalances, formatMinDenom } from '../utils/shieldedBalance'
@@ -15,6 +16,7 @@ export type FetchBalancesOptions = {
   force?: boolean
   onProgress?: (evt: { step: string; data?: any }) => void
   skipConnectionCheck?: boolean
+  chainKey?: string // For EVM balance fetching
 }
 
 const inFlight = new Map<BalanceKind, Promise<void>>()
@@ -35,7 +37,7 @@ export function useBalanceService() {
         try {
           switch (kind) {
             case 'evmUsdc':
-              await updateEvmUsdc()
+              await updateEvmUsdc(opts.chainKey || 'sepolia')
               break
             case 'namadaTransparentUsdc':
               await updateNamadaTransparent('usdc')
@@ -66,23 +68,34 @@ export function useBalanceService() {
     await Promise.all(rest.map(runKind))
   }
 
-  const updateEvmUsdc = async () => {
-    try { console.info('[BalanceSvc][evmUsdc] start (external RPC)') } catch {}
-    const chain = 'sepolia'
-    const usdc = (import.meta as any)?.env?.VITE_USDC_SEPOLIA as string
-    const rpcUrl = (import.meta as any)?.env?.VITE_SEPOLIA_RPC as string
-    if (!usdc || !rpcUrl) return
-    // Prefer address from state (set during MetaMask connect); do not depend on extension focus
-    const addr = (state.addresses as any)?.[chain]
-    if (!addr || typeof addr !== 'string' || addr.length < 42) {
-      try { console.info('[BalanceSvc][evmUsdc] no EVM address in state for', chain) } catch {}
+  const updateEvmUsdc = async (chainKey: string = 'sepolia') => {
+    try { console.info('[BalanceSvc][evmUsdc] start (external RPC) for chain:', chainKey) } catch {}
+    const usdc = getUsdcAddress(chainKey)
+    const rpcUrl = getPrimaryRpcUrl(chainKey)
+    if (!usdc || !rpcUrl) {
+      try { console.info('[BalanceSvc][evmUsdc] missing config for chain:', chainKey) } catch {}
+      return
+    }
+    
+    // Find any EVM address since all EVM chains share the same MetaMask address
+    const evmAddresses = [
+      state.addresses.ethereum,
+      state.addresses.base,
+      state.addresses.polygon,
+      state.addresses.arbitrum,
+      state.addresses.sepolia
+    ]
+    const addr = evmAddresses.find(addr => addr && typeof addr === 'string' && addr.length >= 42)
+    
+    if (!addr) {
+      try { console.info('[BalanceSvc][evmUsdc] no EVM address found in state for any chain') } catch {}
       return
     }
     const provider = new ethers.JsonRpcProvider(rpcUrl)
     const c = new ethers.Contract(usdc, ['function balanceOf(address) view returns (uint256)'], provider)
     const bal = await c.balanceOf(addr)
     const formatted = new BigNumber(ethers.formatUnits(bal, 6)).toFixed(6)
-    dispatch({ type: 'MERGE_BALANCES', payload: { [chain]: { usdc: formatted } } })
+    dispatch({ type: 'MERGE_BALANCES', payload: { [chainKey]: { usdc: formatted } } })
     try { console.info('[BalanceSvc][evmUsdc] done (external RPC)', formatted) } catch {}
   }
 
