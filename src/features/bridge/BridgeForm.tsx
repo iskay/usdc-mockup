@@ -288,8 +288,8 @@ export const BridgeForm: React.FC = () => {
 
   const startSepoliaDeposit = async () => {
     try {
-      const txId = currentDepositTxIdRef.current || `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-      if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
+      const txId = `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      currentDepositTxIdRef.current = txId
       
       await startEvmDepositAction(
         { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },

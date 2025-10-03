@@ -16,6 +16,7 @@ export type NamadaDepositTrackInputs = {
   startHeight: number
   forwardingAddress: string
   namadaReceiver: string
+  expectedAmountUusdc?: string  // Expected amount in uusdc (6 decimals)
   denom?: string
   timeoutMs?: number
   intervalMs?: number
@@ -33,12 +34,13 @@ export async function pollNamadaForDeposit(inputs: NamadaDepositTrackInputs, onU
   const deadline = Date.now() + timeoutMs
   let nextHeight = inputs.startHeight
   const denom = inputs.denom || 'uusdc'
+  const expectedAmount = inputs.expectedAmountUusdc
 
   let ackFound = false
   let foundAt: number | undefined
   let namadaTxHash: string | undefined
 
-  try { console.info('[NamadaDepositPoller] Starting poll', { namadaRpc: inputs.namadaRpc, startHeight: inputs.startHeight, forwardingAddress: inputs.forwardingAddress, namadaReceiver: inputs.namadaReceiver, denom }) } catch {}
+  try { console.info('[NamadaDepositPoller] Starting poll', { namadaRpc: inputs.namadaRpc, startHeight: inputs.startHeight, forwardingAddress: inputs.forwardingAddress, namadaReceiver: inputs.namadaReceiver, denom, expectedAmount }) } catch {}
 
   while (Date.now() < deadline && !ackFound) {
     const latest = await fetchLatestHeight(inputs.namadaRpc)
@@ -61,17 +63,47 @@ export async function pollNamadaForDeposit(inputs: NamadaDepositTrackInputs, onU
           try { console.debug('[NamadaDepositPoller][ack] packet_ack', ack, 'ok', ok) } catch {}
           if (!ok) continue
           try {
-            const parsed = JSON.parse(pdata || '{}') as any
+            // Handle both direct JSON and JSON string in 'value' field
+            let parsed: any
+            if (typeof pdata === 'string') {
+              parsed = JSON.parse(pdata)
+            } else if (pdata && typeof pdata === 'object' && 'value' in pdata) {
+              parsed = JSON.parse((pdata as any).value)
+            } else {
+              parsed = pdata || {}
+            }
             const recv = parsed?.receiver
             const send = parsed?.sender
             const d = parsed?.denom
             const amount = parsed?.amount
-            try { console.debug('[NamadaDepositPoller][ack] packet_data', { receiver: recv, sender: send, denom: d, amount }) } catch {}
+            try { console.debug('[NamadaDepositPoller][ack] packet_data', { 
+              receiver: recv, 
+              sender: send, 
+              denom: d, 
+              amount,
+              fullPacketData: parsed,
+              rawPacketData: pdata
+            }) } catch {}
             const receiverMatches = recv === inputs.namadaReceiver
             const senderMatches = send === inputs.forwardingAddress
             const denomMatches = d === denom
-            try { console.debug('[NamadaDepositPoller][ack] matches', { receiverMatches, senderMatches, denomMatches }) } catch {}
-            if (receiverMatches && senderMatches && denomMatches) {
+            // Handle amount comparison - expectedAmount might include "uusdc" suffix
+            let amountMatches = true
+            if (expectedAmount) {
+              // Extract just the numeric part for comparison
+              const expectedNumeric = expectedAmount.replace('uusdc', '')
+              const actualNumeric = amount?.toString().replace('uusdc', '') || ''
+              amountMatches = expectedNumeric === actualNumeric
+              try { console.debug('[NamadaDepositPoller][ack] amount comparison', { 
+                expectedAmount, 
+                expectedNumeric, 
+                actualAmount: amount, 
+                actualNumeric, 
+                amountMatches 
+              }) } catch {}
+            }
+            try { console.debug('[NamadaDepositPoller][ack] matches', { receiverMatches, senderMatches, denomMatches, amountMatches, expectedAmount, actualAmount: amount }) } catch {}
+            if (receiverMatches && senderMatches && denomMatches && amountMatches) {
               ackFound = true
               foundAt = nextHeight
               namadaTxHash = inner

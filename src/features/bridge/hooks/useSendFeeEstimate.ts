@@ -15,7 +15,7 @@ export function useSendFeeEstimate(isReady: boolean, sdk: any, amount: string, a
         const namAddr = await getNAMAddressFromRegistry()
         const gasTokenCandidate = usdcToken || namAddr || (import.meta.env.VITE_NAMADA_NAM_TOKEN as string)
         const estimate = await fetchGasEstimateIbcUnshieldingTransfer()
-        const gas = await estimateGasForToken(gasTokenCandidate, ['IbcTransfer'], String(estimate.avg || 75000))
+        const gas = await estimateGasForToken(gasTokenCandidate, ['IbcTransfer'], String(estimate.max || 75000))
         const feeInMinDenom = new BigNumber(gas.gasLimit).multipliedBy(gas.gasPriceInMinDenom)
         const isUSDC = gas.gasToken === usdcToken
         

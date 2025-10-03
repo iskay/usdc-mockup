@@ -11,6 +11,7 @@ import { getPhaseMessage } from '../utils/txMessages'
 import { evmHex20ToBase64_32 } from '../../../utils/ibcMemo'
 import { getUSDCAddressFromRegistry, getAssetDecimalsByDisplay } from '../../../utils/namadaBalance'
 import { fetchLatestHeight } from '../../../utils/noblePoller'
+import { fetchGasEstimateIbcUnshieldingTransfer } from '../../../utils/indexer'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../../utils/txShield'
 import { depositForBurn } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
@@ -197,7 +198,9 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const memo = buildOrbiterCctpMemo({ destinationDomain, evmRecipientHex20: inputs.destinationAddress })
   const mintRecipientB64 = evmHex20ToBase64_32(inputs.destinationAddress)
 
-  const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], '90000')
+  // Use high gas value for Orbiter send transactions for better reliability
+  const gasEstimate = await fetchGasEstimateIbcUnshieldingTransfer()
+  const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], String(gasEstimate.max || 90000))
   const chainSett = { chainId, nativeTokenAddress: gas.gasToken }
 
   // Create a single disposable signer for both wrapper and refund target

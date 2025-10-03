@@ -34,7 +34,7 @@ export const estimateGasForToken = async (
 
   try {
     const estimate = await fetchGasEstimateForKinds(txKinds)
-    const gasLimit = new BigNumber(estimate?.avg ?? fallbackGasLimit)
+    const gasLimit = new BigNumber((estimate?.avg ?? fallbackGasLimit) * 1.5)
     return {
       gasToken: selectedGasToken,
       gasLimit,
