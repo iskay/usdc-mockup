@@ -165,7 +165,7 @@ type SendInputs = {
 
 export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast, getNamadaAccounts }: Deps, inputs: SendInputs) {
   // Generate a stable transaction ID once at the beginning
-  const txId = `send_${Date.now()}`
+  const txId = `send_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   let transactionAdded = false
   let worker: Worker | null = null
   let refundTarget: string | undefined
@@ -189,7 +189,12 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
 
   const channelId = (import.meta as any)?.env?.VITE_CHANNEL_ID_ON_NAMADA as string || 'channel-27'
   const receiver = 'noble15xt7kx5mles58vkkfxvf0lq78sw04jajvfgd4d'
-  const memo = buildOrbiterCctpMemo({ destinationDomain: 0, evmRecipientHex20: inputs.destinationAddress })
+  
+  // Get the correct CCTP domain for the destination chain
+  const { getCctpDomain } = await import('../../../utils/chain')
+  const destinationDomain = getCctpDomain(inputs.destinationChain) ?? 0
+  
+  const memo = buildOrbiterCctpMemo({ destinationDomain, evmRecipientHex20: inputs.destinationAddress })
   const mintRecipientB64 = evmHex20ToBase64_32(inputs.destinationAddress)
 
   const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], '90000')
@@ -247,7 +252,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   // Start dedicated worker for this tx to poll Noble + Sepolia in isolation
   try {
     const nobleRpc = (import.meta as any)?.env?.VITE_NOBLE_RPC as string
-    const startHeight = (await fetchLatestHeight(nobleRpc)) + 1
+    const startHeight = (await fetchLatestHeight(nobleRpc)) - 20
     const destinationCallerB64 = (import.meta as any)?.env?.VITE_PAYMENT_DESTINATION_CALLER ? evmHex20ToBase64_32((import.meta as any).env.VITE_PAYMENT_DESTINATION_CALLER as string) : ''
     // Resolve EVM chain polling inputs from config
     const { getPrimaryRpcUrl, getUsdcAddress, getChainDisplayName } = await import('../../../utils/chain')
@@ -306,7 +311,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
           amount: amountInBase.toString(),
           destinationCallerB64,
           mintRecipientB64,
-          destinationDomain: 0,
+          destinationDomain,
           channelId,
           timeoutMs: 5 * 60 * 1000,
           intervalMs: 5000,
@@ -486,7 +491,7 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
     try {
       const { createTxService } = await import('../../../services/txService')
       const svc = createTxService(dispatch)
-      const txId = `shield_${Date.now()}`
+      const txId = `shield_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       svc.trackShield({ txId, amount: amountInBase.toString(), tokenSymbol: (inputs.display.toUpperCase() as any), namadaHash: hash, namadaChainId: chainId })
     } catch {}
     
@@ -500,7 +505,8 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
 }
 
 export async function startEvmDepositAction({ sdk, dispatch, showToast }: Deps, inputs: DepositInputs & { chainKey: string }) {
-  const txId = inputs.txId || `dep_${Date.now()}`
+  // Generate unique transaction ID with timestamp + random component
+  const txId = inputs.txId || `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   
   try {
     if (!window.ethereum) {

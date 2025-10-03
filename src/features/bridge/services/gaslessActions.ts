@@ -24,7 +24,7 @@ export async function startGaslessDepositAction(
   { sdk, state, dispatch, showToast }: Deps, 
   inputs: GaslessDepositInputs
 ) {
-  const txId = `gasless_dep_${Date.now()}`
+  const txId = `gasless_dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   
   try {
     // 1. Validate inputs
@@ -60,7 +60,7 @@ export async function startGaslessDepositAction(
     })
 
     // 4. Get user address
-    const userAddress = (state.addresses as any)[inputs.chain]
+    const userAddress = state.addresses.sepolia || state.addresses.ethereum || state.addresses.base || state.addresses.polygon || state.addresses.arbitrum
     if (!userAddress) {
       throw new Error('User address not found')
     }

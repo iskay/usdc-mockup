@@ -223,12 +223,40 @@ export const BridgeForm: React.FC = () => {
   const currentDepositTxIdRef = useRef<string | null>(null)
   const currentSendTxIdRef = useRef<string | null>(null)
   const [depositFeeEst, setDepositFeeEst] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0) // Force re-render for 5-second window
 
   // Derived views from global transactions
-  const inProgressDeposits = state.transactions.filter((t) => t.kind === 'deposit' && t.status !== 'success' && t.status !== 'error')
+  // Show in-progress transactions + recently completed/error ones (within 5 seconds)
+  const now = Date.now()
+  const fiveSecondsAgo = now - 5000
+  
+  // Use refreshKey to ensure filtering re-evaluates every second
+  const inProgressDeposits = state.transactions.filter((t) => {
+    if (t.kind !== 'deposit') return false
+    // Show if in-progress OR recently completed/error
+    return t.status !== 'success' && t.status !== 'error' || 
+           (t.status === 'success' || t.status === 'error') && t.updatedAt > fiveSecondsAgo
+  })
   const latestDepositTx = inProgressDeposits[0]
-  const inProgressSends = state.transactions.filter((t) => t.kind === 'send' && t.status !== 'success' && t.status !== 'error')
+  
+  const inProgressSends = state.transactions.filter((t) => {
+    if (t.kind !== 'send') return false
+    // Show if in-progress OR recently completed/error
+    return t.status !== 'success' && t.status !== 'error' || 
+           (t.status === 'success' || t.status === 'error') && t.updatedAt > fiveSecondsAgo
+  })
   const latestSendTx = inProgressSends[0]
+  
+  // Force re-evaluation when refreshKey changes (every second)
+  const _ = refreshKey // This ensures the filtering logic re-runs when refreshKey changes
+
+  // Update refresh key every second to re-evaluate 5-second window
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshKey(prev => prev + 1)
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Initialize send form inputs from latest pending send tx (keep UX), no local status kept
   useEffect(() => {
@@ -239,11 +267,28 @@ export const BridgeForm: React.FC = () => {
         if (latestSendTx.destination) setSendAddress(latestSendTx.destination)
       }
     } catch {}
-  }, [state.transactions, latestSendTx])
+  }, [state.transactions, latestSendTx, refreshKey]) // Include refreshKey to handle recently completed transactions
+
+  // Initialize deposit form inputs from latest pending deposit tx (keep UX), no local status kept
+  useEffect(() => {
+    try {
+      if (latestDepositTx) {
+        if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = latestDepositTx.id
+        if (latestDepositTx.amount) setDepositAmount(latestDepositTx.amount)
+        if (latestDepositTx.destination) setDepositAddress(latestDepositTx.destination)
+        // Restore the chain from the transaction's evm field or fromChain
+        if (latestDepositTx.evm?.chain) {
+          setChain(latestDepositTx.evm.chain)
+        } else if (latestDepositTx.fromChain) {
+          setChain(latestDepositTx.fromChain)
+        }
+      }
+    } catch {}
+  }, [state.transactions, latestDepositTx, refreshKey]) // Include refreshKey to handle recently completed transactions
 
   const startSepoliaDeposit = async () => {
     try {
-      const txId = currentDepositTxIdRef.current || `dep_${Date.now()}`
+      const txId = currentDepositTxIdRef.current || `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       if (!currentDepositTxIdRef.current) currentDepositTxIdRef.current = txId
       
       await startEvmDepositAction(
@@ -314,7 +359,7 @@ export const BridgeForm: React.FC = () => {
         // Only fetch for EVM chains, require metamask connected and address present
         const isEvm = chain !== 'namada'
         const isConnected = state.walletConnections.metamask === 'connected'
-        const addr = (state.addresses as any)[chain]
+        const addr = state.addresses.sepolia || state.addresses.ethereum || state.addresses.base || state.addresses.polygon || state.addresses.arbitrum
         console.debug('[EVM] Balance fetch trigger:', { chain, isEvm, isConnected, addr })
 
         // Validate address format before attempting to fetch balance
@@ -346,7 +391,7 @@ export const BridgeForm: React.FC = () => {
     // Only run on EVM chains and when connected
     const isEvm = chain !== 'namada'
     const isConnected = state.walletConnections.metamask === 'connected'
-    const addr = (state.addresses as any)[chain]
+    const addr = state.addresses.sepolia || state.addresses.ethereum || state.addresses.base || state.addresses.polygon || state.addresses.arbitrum
     const isValidAddress = addr && addr.length >= 42 && addr.startsWith('0x')
     if (!isEvm || !isConnected || !isValidAddress) return
 

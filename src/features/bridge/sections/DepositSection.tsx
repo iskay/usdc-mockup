@@ -105,7 +105,7 @@ const DepositSection: React.FC<Props> = ({
         <div className="label-text">Network</div>
         <SelectMenu value={chain} onChange={setChain} options={chains} disabled={!!latestDepositTx} />
         <div className="info-text ml-4">
-          My Address: {chain === 'namada' ? shorten(state.addresses.namada.transparent) : (state.walletConnections.metamask === 'connected' ? shorten((state.addresses as any)[chain]) : (
+          My Address: {chain === 'namada' ? shorten(state.addresses.namada.transparent) : (state.walletConnections.metamask === 'connected' ? shorten(state.addresses.sepolia || state.addresses.ethereum || state.addresses.base || state.addresses.polygon || state.addresses.arbitrum) : (
             <button
               type="button"
               onClick={async () => {
@@ -154,7 +154,7 @@ const DepositSection: React.FC<Props> = ({
           onToggle={setGaslessEnabled}
           chain={chain}
           amount={depositAmount}
-          userAddress={(state.addresses as any)[chain]}
+          userAddress={state.addresses.sepolia || state.addresses.ethereum || state.addresses.base || state.addresses.polygon || state.addresses.arbitrum}
           availableBalance={availableBalance}
         />
       )}
@@ -298,9 +298,29 @@ const DepositSection: React.FC<Props> = ({
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{depositAmount} USDC</span></div>
                 <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground"><InlineAddress value={depositAddress} /></span></div>
-                <div className="flex justify-between"><span>On</span><span className="font-semibold text-foreground">{chains.find(c => c.value === chain)?.label} → Namada</span></div>
-                <div className="flex justify-between"><span>{getChainDisplayName(chain)} Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  <InlineHash value={latestDepositTx?.sepoliaHash as string | undefined} explorerUrl={latestDepositTx?.sepoliaHash ? getEvmTxUrl(chain, latestDepositTx.sepoliaHash) : undefined} />
+                <div className="flex justify-between"><span>On</span><span className="font-semibold text-foreground">
+                  {latestDepositTx?.evm ? 
+                    `${getChainDisplayName(latestDepositTx.evm.chain)} → Namada` :
+                    `${chains.find(c => c.value === chain)?.label} → Namada`
+                  }
+                </span></div>
+                <div className="flex justify-between"><span>
+                  {latestDepositTx?.evm ? 
+                    `${getChainDisplayName(latestDepositTx.evm.chain)} Send Tx` :
+                    `${getChainDisplayName(chain)} Send Tx`
+                  }
+                </span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  <InlineHash 
+                    value={latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash as string | undefined} 
+                    explorerUrl={
+                      (latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash) ? 
+                        getEvmTxUrl(
+                          latestDepositTx?.evm?.chain || chain, 
+                          latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash as string
+                        ) : 
+                        undefined
+                    } 
+                  />
                 </span></div>
                 <div className="flex justify-between"><span>Namada Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
                   <InlineHash

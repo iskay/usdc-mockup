@@ -237,12 +237,35 @@ const SendSection: React.FC<Props> = ({
               </div>
               <div className="text-sm text-foreground-secondary">
                 <div className="flex justify-between"><span>Amount</span><span className="font-semibold text-foreground">{sendAmount} USDC</span></div>
-                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground flex items-center gap-2"><InlineAddress value={sendAddress} explorerUrl={getEvmAddressUrl(chain, sendAddress)} /></span></div>
+                <div className="flex justify-between"><span>Destination</span><span className="font-semibold text-foreground flex items-center gap-2">
+                  <InlineAddress 
+                    value={sendAddress} 
+                    explorerUrl={getEvmAddressUrl(
+                      latestSendTx?.evm?.chain || chain, 
+                      sendAddress
+                    )} 
+                  />
+                </span></div>
                 <div className="flex justify-between"><span>Namada Send Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
                   <InlineHash value={latestSendTx?.namadaHash as string | undefined} explorerUrl={latestSendTx?.namadaHash ? getNamadaTxExplorerUrl(String(latestSendTx.namadaChainId || ''), latestSendTx.namadaHash as string) : undefined} />
                 </span></div>
-                <div className="flex justify-between"><span>{getChainDisplayName(chain)} Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  <InlineHash value={latestSendTx?.sepoliaHash as string | undefined} explorerUrl={latestSendTx?.sepoliaHash ? getEvmTxUrl(chain, latestSendTx.sepoliaHash) : undefined} />
+                <div className="flex justify-between"><span>
+                  {latestSendTx?.evm ? 
+                    `${getChainDisplayName(latestSendTx.evm.chain)} Receive Tx` :
+                    `${getChainDisplayName(chain)} Receive Tx`
+                  }
+                </span><span className="font-mono text-xs text-foreground flex items-center gap-2">
+                  <InlineHash 
+                    value={latestSendTx?.evm?.hash || latestSendTx?.sepoliaHash as string | undefined} 
+                    explorerUrl={
+                      (latestSendTx?.evm?.hash || latestSendTx?.sepoliaHash) ? 
+                        getEvmTxUrl(
+                          latestSendTx?.evm?.chain || chain, 
+                          latestSendTx?.evm?.hash || latestSendTx?.sepoliaHash as string
+                        ) : 
+                        undefined
+                    } 
+                  />
                 </span></div>
               </div>
             </div>

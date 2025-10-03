@@ -36,7 +36,7 @@ const pollingJobs = new Map<string, AbortController>()
 export function createTxService(dispatch: (action: any) => void) {
 
   const createTransaction = (tx: any): string => {
-    const id = tx.id || `${tx.kind}_${Date.now()}`
+    const id = tx.id || `${tx.kind}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
     const now = Date.now()
     dispatch({ type: 'UPSERT_TRANSACTION', payload: { ...tx, id, createdAt: tx.createdAt ?? now, updatedAt: now } })
     return id
@@ -71,7 +71,7 @@ export function createTxService(dispatch: (action: any) => void) {
       dispatch({ type: 'SET_TRANSACTION_STATUS', payload: { id: ctx.txId, status: 'pending' } })
       dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: ctx.txId, changes: { sepoliaHash: ctx.sepoliaHash } } })
 
-      const startHeight = (await fetchNobleLatestHeight(nobleRpc)) + 1
+      const startHeight = (await fetchNobleLatestHeight(nobleRpc)) - 20
       try { console.info('[TxService][Deposit] Noble poll starting', { startHeight }) } catch {}
       const expectedAmountUusdc = `${Math.round(Number(ctx.amountUsdc) * 1e6)}uusdc`
 
@@ -111,7 +111,7 @@ export function createTxService(dispatch: (action: any) => void) {
         try { console.warn('[TxService][Deposit] missing VITE_NAMADA_RPC_URL; skipping Namada poller') } catch {}
         return
       }
-      const namadaStart = (await fetchNamadaLatestHeight(namadaRpc)) + 1
+      const namadaStart = (await fetchNamadaLatestHeight(namadaRpc)) - 20
       try { console.info('[TxService][Deposit] Namada poll starting', { namadaStart }) } catch {}
       const namadaRes = await pollNamadaForDeposit({
         namadaRpc,

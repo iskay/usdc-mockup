@@ -47,7 +47,8 @@ export const HistoryPage: React.FC = () => {
                         <div className="flex justify-between"><span>Destination</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.destination}
                           <button onClick={() => { navigator.clipboard.writeText(tx.destination as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
                           <button onClick={() => {
-                            const url = getEvmAddressUrl('sepolia', tx.destination as string)
+                            const chain = tx.kind === 'deposit' ? tx.fromChain : tx.toChain
+                            const url = getEvmAddressUrl(chain as string, tx.destination as string)
                             if (url) window.open(url, '_blank')
                           }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                         </span></div>
@@ -64,14 +65,31 @@ export const HistoryPage: React.FC = () => {
                           }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
                         </span></div>
                       ) : null}
-                      {tx.sepoliaHash ? (
-                        <div className="flex justify-between"><span>{getChainDisplayName('sepolia')} Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">{tx.sepoliaHash}
-                          <button onClick={() => { navigator.clipboard.writeText(tx.sepoliaHash as string) }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-copy text-[11px]" /></button>
-                          <button onClick={() => {
-                            const url = getEvmTxUrl('sepolia', tx.sepoliaHash as string)
-                            if (url) window.open(url, '_blank')
-                          }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}><i className="fas fa-arrow-up-right-from-square text-[11px]" /></button>
-                        </span></div>
+                      {(tx.evm?.hash || tx.sepoliaHash) ? (
+                        <div className="flex justify-between">
+                          <span>
+                            {tx.evm ? 
+                              `${getChainDisplayName(tx.evm.chain)} Tx` : 
+                              `${getChainDisplayName(tx.fromChain as string)} Tx`
+                            }
+                          </span>
+                          <span className="font-mono text-xs text-foreground flex items-center gap-2">
+                            {tx.evm?.hash || tx.sepoliaHash}
+                            <button onClick={() => { 
+                              navigator.clipboard.writeText(tx.evm?.hash || tx.sepoliaHash as string) 
+                            }} title="Copy to Clipboard" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}>
+                              <i className="fas fa-copy text-[11px]" />
+                            </button>
+                            <button onClick={() => {
+                              const hash = tx.evm?.hash || tx.sepoliaHash as string
+                              const chain = tx.evm?.chain || tx.fromChain as string
+                              const url = getEvmTxUrl(chain, hash)
+                              if (url) window.open(url, '_blank')
+                            }} title="View on Explorer" className="rounded px-1 py-0.5 hover:bg-button-active/10 active:scale-95 transition" style={{ transitionDelay: '0ms' }}>
+                              <i className="fas fa-arrow-up-right-from-square text-[11px]" />
+                            </button>
+                          </span>
+                        </div>
                       ) : null}
                       <div className="flex justify-between"><span>Status</span><span className="text-foreground font-medium">{tx.status}</span></div>
                     </div>
