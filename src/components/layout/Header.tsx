@@ -427,7 +427,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
         <div className="absolute inset-0 bg-black/50" onClick={() => setShowHelpModal(false)} />
         <div className="relative z-[1001] w-full max-w-2xl mx-4 rounded-2xl border border-border-muted bg-card shadow-xl">
           <div className="flex items-center justify-between px-5 py-4 border-b border-border-muted">
-            <h2 className="text-lg font-semibold">How to use this app</h2>
+            <h2 className="text-lg font-semibold">Welcome to USDC.delivery</h2>
             <button
               type="button"
               onClick={() => setShowHelpModal(false)}
@@ -439,21 +439,24 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           </div>
           <div className="px-5 py-5 max-h-[70vh] overflow-auto text-foreground">
             {/* Placeholder rich content; update as needed */}
-            <h1 className="text-xl font-bold mb-2">Welcome to USDC.delivery</h1>
-            <p className="mb-3">
-              This modal supports basic markup elements like <span className="font-semibold">headings</span>,
-              <span> paragraphs</span>, and inline <span className="italic">spans</span>.
+            <h1 className="text-xl font-bold mb-2 text-accent-green">What is this app?</h1>
+            <p className="mb-2 text-left">
+              This is a small demo to showcase the potential of using Namada to make private payments to and from EVM chains, using Namada's shielded pool.
             </p>
-            <p className="mb-3">
-              Example flow:
+            <p className="mb-6 text-left">
+            Noble's grand-1 testnet is used as an intermediary to forward the USDC via Circle's CCTP between any of the available EVM testnet chains and Namada's 'housefire' testnet.
             </p>
-            <ol className="list-decimal pl-5 space-y-1 text-sm">
-              <li>Connect MetaMask and Namada Keychain.</li>
-              <li>Deposit USDC to Namada or Send privately from Namada to EVM.</li>
-              <li>Use “Shielded Sync” to refresh shielded balances.</li>
+            <h1 className="text-xl font-bold mb-2 text-accent-green">How to use</h1>
+            <ol className="list-decimal pl-5 space-y-1 text-sm text-left mb-6">
+              <li>Connect MetaMask and Namada Keychain using the menu in the top right.</li>
+              <li>Make a deposit by selecting a source EVM chain, a destination Namada tnam address, and a USDC amount. <span className='font-bold'>NOTE:</span> 'Gasless' (i.e. using USDC only) transactions are not supported on testnet, therefore you'll need a small amount of testnet native token to pay the gas for the initial contract call. You can get testnet USDC from https://faucet.circle.com</li>
+              <li>The amount will be deposited into your Transparent Balance (on Namada). Use the “Shield Now” button to move it to your Shielded Balance, making it available for payments.</li>
+              <li>Click 'Shielded Sync' to update your Namada Shielded Balance (any outgoing transfers may fail if your balance is out of date). The first time will take several minutes but subsequent syncs will be much faster.</li>
+              <li>Make a shielded payment from your Namada Shielded balance by switching to the Send tab and selecting a destination EVM chain and amount.</li>
             </ol>
-            <p className="mt-4 text-sm text-muted-fg">
-              Replace this content in <code>Header.tsx</code> with your own documentation.
+            <h1 className="text-xl font-bold mb-2 text-accent-green">Caveats</h1>
+            <p className="mb-2 text-left">
+              This testnet demo doesn't yet include support for recovery (fallback) addresses, ie. where your USDC would be sent to in case something goes wrong in the transaction chain. You may lose some testnet USDC along the way :(
             </p>
           </div>
           <div className="px-5 py-4 border-t border-border-muted flex justify-end">
