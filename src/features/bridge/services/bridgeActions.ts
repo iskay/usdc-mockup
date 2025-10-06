@@ -11,7 +11,6 @@ import { getPhaseMessage } from '../utils/txMessages'
 import { evmHex20ToBase64_32 } from '../../../utils/ibcMemo'
 import { getUSDCAddressFromRegistry, getAssetDecimalsByDisplay } from '../../../utils/namadaBalance'
 import { fetchLatestHeight } from '../../../utils/noblePoller'
-import { fetchGasEstimateIbcUnshieldingTransfer } from '../../../utils/indexer'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../../utils/txShield'
 import { depositForBurn } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
@@ -123,7 +122,15 @@ export async function debugOrbiterAction({ sdk, state, dispatch, showToast, getN
   }
 
   const allAccounts = [...(await getNamadaAccounts())]
-  const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
+  const currentShieldedAddr = state.addresses.namada.shielded
+  let shieldedAccount = (allAccounts || []).find(
+    (a) => a?.address === currentShieldedAddr && typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0
+  )
+  if (!shieldedAccount) {
+    shieldedAccount = (allAccounts || []).find(
+      (a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0
+    )
+  }
   const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
   if (!pseudoExtendedKey) {
     showToast({ title: 'Debug Orbiter', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' })
@@ -198,9 +205,7 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
   const memo = buildOrbiterCctpMemo({ destinationDomain, evmRecipientHex20: inputs.destinationAddress })
   const mintRecipientB64 = evmHex20ToBase64_32(inputs.destinationAddress)
 
-  // Use high gas value for Orbiter send transactions for better reliability
-  const gasEstimate = await fetchGasEstimateIbcUnshieldingTransfer()
-  const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], String(gasEstimate.max || 90000))
+  const gas = await estimateGasForToken(usdcToken, ['IbcTransfer'], '90000')
   const chainSett = { chainId, nativeTokenAddress: gas.gasToken }
 
   // Create a single disposable signer for both wrapper and refund target
@@ -224,7 +229,15 @@ export async function sendNowViaOrbiterAction({ sdk, state, dispatch, showToast,
 
   // Shielded pseudo key for paying gas
   const allAccounts = [...(await getNamadaAccounts())]
-  const shieldedAccount = (allAccounts || []).find((a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0)
+  const currentShieldedAddr = state.addresses.namada.shielded
+  let shieldedAccount = (allAccounts || []).find(
+    (a) => a?.address === currentShieldedAddr && typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0
+  )
+  if (!shieldedAccount) {
+    shieldedAccount = (allAccounts || []).find(
+      (a) => typeof a?.pseudoExtendedKey === 'string' && a.pseudoExtendedKey.length > 0
+    )
+  }
   const pseudoExtendedKey = shieldedAccount?.pseudoExtendedKey as string | undefined
   if (!pseudoExtendedKey) { showToast({ title: 'Send', message: 'No shielded account with pseudoExtendedKey found', variant: 'error' }); return }
 

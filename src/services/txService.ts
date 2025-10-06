@@ -111,7 +111,7 @@ export function createTxService(dispatch: (action: any) => void) {
         try { console.warn('[TxService][Deposit] missing VITE_NAMADA_RPC_URL; skipping Namada poller') } catch {}
         return
       }
-      const namadaStart = (await fetchNamadaLatestHeight(namadaRpc)) - 5
+      const namadaStart = (await fetchNamadaLatestHeight(namadaRpc)) - 20
       try { console.info('[TxService][Deposit] Namada poll starting', { namadaStart }) } catch {}
       const namadaRes = await pollNamadaForDeposit({
         namadaRpc,
