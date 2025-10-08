@@ -439,22 +439,29 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
           </div>
           <div className="px-5 py-5 max-h-[70vh] overflow-auto text-foreground">
             {/* Placeholder rich content; update as needed */}
-            <h1 className="text-xl font-bold mb-2">Welcome to USDC.delivery</h1>
-            <p className="mb-3">
-              This modal supports basic markup elements like <span className="font-semibold">headings</span>,
-              <span> paragraphs</span>, and inline <span className="italic">spans</span>.
+            <h1 className="text-xl font-bold mb-2 text-accent-green">Welcome to USDC.delivery</h1>
+            <p className="mb-3 text-sm">
+              This small demo app is meant to show the potential of using Namada's shielded pool to privately send and receive USDC from multiple EVM chains, quickly and easily. Noble's 'grand-1' testnet is used as a forwarding intermediary to/from Namada's 'housefire' testnet.
             </p>
-            <p className="mb-3">
-              Example flow:
+            <p className="mb-3 text-sm">
+              Only testnet assets are used in this demo. You can request testnet USDC from https://faucet.circle.com.
             </p>
-            <ol className="list-decimal pl-5 space-y-1 text-sm">
-              <li>Connect MetaMask and Namada Keychain.</li>
-              <li>Deposit USDC to Namada or Send privately from Namada to EVM.</li>
-              <li>Use “Shielded Sync” to refresh shielded balances.</li>
+            <p className="mb-3 text-sm">
+              <span className='font-bold'>NOTE:</span> 'Gasless' USDC transactions haven't been implemented in the testnet version of this app, so you'll also need some native token balance on your EVM deposit chain for transaction fees.
+            </p>
+            <p className="mb-3 text-left text-white/90 text-lg">
+              How to Use:
+            </p>
+            <ol className="list-decimal pl-5 space-y-1 text-sm text-left">
+              <li>Connect MetaMask and Namada Keychain using the button in the top right.</li>
+              <li>Deposit USDC by selecting an EVM source chain and amount. Use the 'Auto Fill' button to enter your Namada transparent address as the destination. Click 'Deposit USDC.'</li>
+              <li>You'll be asked to sign a <span className='font-semibold'>depositForBurn</span> transaction on the source EVM chain, and the funds will be forwarded (via Noble testnet) to Namada. After a few minutes, the USDC will appear in your Namada transparent balance.</li>
+              <li>Click 'Shield Now' to move your Namada transparent balance to your shielded balance.</li>
+              <li>You can now make shielded payments to any of the available EVM chains. Click the 'Send' tab to switch to the payment view.</li>
+              <li>Before sending a shielded payment, it's recommended to click the 'Shielded Sync' button to make sure your shielded context is up to date. The first time you sync will take several minutes, but subsequent syncs will be much faster.</li>
+              <li>Enter an amount and select a destination EVM chain and address. Then click the 'Send USDC' button.</li>
+              <li>You'll be asked to approve a Namada Unshielding IBC transaction to Noble testnet, which will auto-forward your funds to the final destination within a few minutes.</li>
             </ol>
-            <p className="mt-4 text-sm text-muted-fg">
-              Replace this content in <code>Header.tsx</code> with your own documentation.
-            </p>
           </div>
           <div className="px-5 py-4 border-t border-border-muted flex justify-end">
             <Button variant="secondary" onClick={() => setShowHelpModal(false)}>Close</Button>
