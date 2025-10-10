@@ -2,13 +2,74 @@ import type { Sdk } from '@namada/sdk-multicore'
 import { SdkEvents, ProgressBarNames } from '@namada/sdk-multicore'
 // @ts-ignore - vite worker import
 import ShieldedSyncWorker from '../workers/ShieldedSyncWorker?worker'
+import type { NamadaKeychainAccount } from './namada'
 
 export type DatedViewingKey = { key: string; birthday: number }
+
 export async function fetchChainIdFromRpc(rpcUrl: string): Promise<string> {
   const res = await fetch(`${rpcUrl}/status`).then(r => r.json()).catch(() => null)
   const id = res?.result?.node_info?.network
   if (typeof id === 'string' && id.length > 0) return id
   throw new Error('Failed to fetch chain id from RPC')
+}
+
+/**
+ * Fetch block height by timestamp from the Namada indexer
+ * This is used to convert account creation timestamps to block heights for birthday optimization
+ */
+export async function fetchBlockHeightByTimestamp(timestamp: number): Promise<number> {
+  try {
+    // Use the same indexer URL that's used elsewhere in the app
+    const indexerUrl = import.meta.env.VITE_NAMADA_INDEXER_URL as string
+    if (!indexerUrl) {
+      throw new Error('Indexer URL not configured')
+    }
+    
+    // Convert timestamp to seconds (if it's in milliseconds)
+    const timestampSeconds = timestamp > 1000000000000 ? Math.floor(timestamp / 1000) : timestamp
+    
+    const response = await fetch(`${indexerUrl}/block/height/by_timestamp/${timestampSeconds}`)
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('Block not found for timestamp')
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    const height = data?.height
+    
+    if (typeof height !== 'number' || height < 0) {
+      throw new Error('Invalid height returned from indexer')
+    }
+    
+    return height
+  } catch (error) {
+    console.warn('Failed to fetch block height by timestamp:', error)
+    throw error
+  }
+}
+
+/**
+ * Calculate the birthday (block height) for a given account
+ * For generated keys, converts the creation timestamp to block height
+ * For imported keys, returns 0 (full sync required)
+ */
+export async function calculateBirthday(account: NamadaKeychainAccount): Promise<number> {
+  // For imported keys or accounts without timestamp, always sync from genesis
+  if (account.source !== "generated" || !account.timestamp) {
+    return 0
+  }
+  
+  try {
+    const height = await fetchBlockHeightByTimestamp(account.timestamp)
+    console.info(`[Birthday] Account ${account.address?.slice(0, 12)}... birthday: block ${height}`)
+    return height
+  } catch (error) {
+    console.warn(`[Birthday] Failed to fetch block height for account ${account.address?.slice(0, 12)}..., falling back to height 0:`, error)
+    return 0
+  }
 }
 
 type EnsureMaspReadyParams = {

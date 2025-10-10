@@ -2,7 +2,7 @@ import { ethers } from 'ethers'
 import BigNumber from 'bignumber.js'
 import { getUsdcAddress, getPrimaryRpcUrl } from '../utils/chain'
 import { getUSDCAddressFromRegistry, getNAMAddressFromRegistry, getNamadaUSDCBalance, getNamadaNAMBalance } from '../utils/namadaBalance'
-import { ensureMaspReady, runShieldedSync } from '../utils/shieldedSync'
+import { ensureMaspReady, runShieldedSync, calculateBirthday } from '../utils/shieldedSync'
 import { fetchShieldedBalances, formatMinDenom } from '../utils/shieldedBalance'
 import { useAppState } from '../state/AppState'
 import { useNamadaSdk } from '../state/NamadaSdkProvider'
@@ -145,9 +145,16 @@ export function useBalanceService() {
         const vkDisp = vk.length > 24 ? vk.slice(0, 12) + '...' + vk.slice(-8) : vk
         console.info('[BalanceSvc][shieldedSync] using viewing key:', vkDisp)
       } catch {}
+      
+      // Calculate the actual birthday for this account
+      // Birthday optimization: For generated keys, we only sync from the block height
+      // when the key was created, significantly reducing sync time for new accounts
+      const birthday = await calculateBirthday(selectedAccount)
+      console.info(`[BalanceSvc][shieldedSync] using birthday: ${birthday} for account ${selectedAccount.address?.slice(0, 12)}...`)
+      
       await runShieldedSync({
         sdk: sdk as any,
-        viewingKeys: [{ key: String(selectedAccount.viewingKey), birthday: 0 }],
+        viewingKeys: [{ key: String(selectedAccount.viewingKey), birthday }],
         chainId,
         onProgress: (p: number) => {
           try { onProgress?.({ step: 'shieldedSyncProgress', data: Math.round(Math.max(0, Math.min(1, p)) * 100) }) } catch {}
