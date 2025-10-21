@@ -36,9 +36,11 @@ export async function fetchNamadaAccountBalances(accountAddress: string): Promis
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const rawBalances = (await res.json()) as any[]
     
-    // Handle both old and new API response formats
+    // Handle multiple API response formats
     const balances = rawBalances.map((b) => ({
-      tokenAddress: typeof b.tokenAddress === 'string' ? b.tokenAddress : b.tokenAddress?.address || '',
+      tokenAddress: typeof b.tokenAddress === 'string' 
+        ? b.tokenAddress 
+        : b.tokenAddress?.address || b.token?.address || '',
       minDenomAmount: b.minDenomAmount
     }))
     
