@@ -1,4 +1,5 @@
 import { getEvmChainsConfig, getDefaultEvmChainKey } from '../../config/evmChains'
+import { SOLANA_MAINNET } from '../../config/solana'
 import { getChainDisplayName, getChainLogo } from '../../utils/chain'
 
 export type ChainOption = {
@@ -12,14 +13,21 @@ export function getChainOptions(): ChainOption[] {
   const config = getEvmChainsConfig()
   if (!config) {
     // Fallback to Sepolia if config not loaded yet
-    return [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
+    return [
+      { label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' },
+      { label: 'Solana', value: 'solana', iconUrl: '/solana-logo.svg' },
+    ]
   }
 
-  return config.chains.map(chain => ({
+  const evmOptions = config.chains.map(chain => ({
     label: chain.name,
     value: chain.key,
     iconUrl: chain.logo || '/ethereum-logo.svg'
   }))
+  // Append Solana
+  const sol = SOLANA_MAINNET
+  const solOption: ChainOption = { label: sol.name, value: sol.key, iconUrl: sol.logo || '/solana-logo.svg' }
+  return [...evmOptions, solOption]
 }
 
 // Get the default selected chain

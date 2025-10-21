@@ -7,6 +7,7 @@ import { useAppState } from '../../state/AppState'
 import { useToast } from '../../components/ui/Toast'
 import Spinner from '../../components/ui/Spinner'
 import { fetchUsdcBalanceForSelectedChain } from '../../utils/evmBalance'
+import { startSolanaDepositAction } from './services/bridgeActions'
 import { getNamadaUSDCBalance, getNamadaNAMBalance } from '../../utils/namadaBalance'
 import { useNamadaSdk } from '../../state/NamadaSdkProvider'
 import { useNamadaKeychain } from '../../utils/namada'
@@ -317,6 +318,35 @@ export const BridgeForm: React.FC = () => {
     }
   }
 
+  const startSolanaDeposit = async () => {
+    try {
+      const txId = `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      currentDepositTxIdRef.current = txId
+      await startSolanaDepositAction(
+        { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
+        {
+          amount: depositAmount,
+          destinationAddress: depositAddress,
+          chain,
+          getAvailableBalance,
+          validateForm,
+          txId
+        }
+      )
+    } catch (err: any) {
+      try {
+        const txId = currentDepositTxIdRef.current
+        if (txId) {
+          dispatch({
+            type: 'UPDATE_TRANSACTION',
+            payload: { id: txId, changes: { status: 'error', errorMessage: err?.message ?? 'Solana deposit failed' } },
+          })
+        }
+      } catch {}
+      showToast({ title: 'Deposit Failed', message: err?.message ?? 'Transaction failed', variant: 'error' })
+    }
+  }
+
   const getAvailableBalance = (chain: string) => {
     if (chain === 'namada') return state.balances.namada.usdcTransparent
     // @ts-ignore typed concrete keys in AppState
@@ -513,7 +543,12 @@ export const BridgeForm: React.FC = () => {
           depositFeeEst={depositFeeEst}
           availableBalance={getAvailableBalance(chain)}
           isMetaMaskConnected={state.walletConnections.metamask === 'connected'}
-          onStartEvmDeposit={() => startSepoliaDeposit()}
+          onStartEvmDeposit={() => {
+            if (chain === 'solana') {
+              return startSolanaDeposit()
+            }
+            return startSepoliaDeposit()
+          }}
           onStartDepositSimulation={() => console.log("Simulate Deposit placeholder")}
           getNamadaAccounts={getNamadaAccounts}
         /> : <SendSection 

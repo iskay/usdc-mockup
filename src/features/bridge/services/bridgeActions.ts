@@ -14,6 +14,8 @@ import { fetchLatestHeight } from '../../../utils/noblePoller'
 import { buildSignBroadcastShielding, type GasConfig as ShieldGasConfig } from '../../../utils/txShield'
 import { depositForBurn } from '../../../utils/evmCctp'
 import { encodeBech32ToBytes32 } from '../../../utils/forwarding'
+import { buildSolanaDepositForBurn } from '../../../utils/solanaCctp'
+import { sendSolanaTransaction, pollSolanaTransaction } from '../../../utils/solanaTx'
 
 // Helper function to clear disposable signer (refund address) from Namada extension
 async function clearDisposableSigner(address: string): Promise<void> {
@@ -647,6 +649,81 @@ export async function startEvmDepositAction({ sdk, dispatch, showToast }: Deps, 
       message: error?.message || 'An unexpected error occurred', 
       variant: 'error' 
     })
+  }
+}
+
+// New: Start Solana deposit (CCTP depositForBurn on Solana)
+export async function startSolanaDepositAction({ dispatch, showToast }: Deps, inputs: DepositInputs & { rpcUrl?: string }) {
+  const txId = inputs.txId || `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+  try {
+    const validation = inputs.validateForm(inputs.amount, inputs.getAvailableBalance('solana'), inputs.destinationAddress)
+    if (!validation.isValid) return
+
+    // Add tx to history
+    dispatch({
+      type: 'ADD_TRANSACTION',
+      payload: {
+        id: txId,
+        kind: 'deposit',
+        amount: inputs.amount,
+        fromChain: 'solana',
+        toChain: 'namada',
+        destination: inputs.destinationAddress,
+        status: 'submitting',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    })
+
+    // Fetch Noble forwarding address (reuse EVM flow's LCD call)
+    const channelId = (import.meta as any)?.env?.VITE_NOBLE_TO_NAMADA_CHANNEL || 'channel-136'
+    const lcdUrl = (import.meta as any)?.env?.VITE_NOBLE_LCD_URL
+    if (!lcdUrl) throw new Error('VITE_NOBLE_LCD_URL not set')
+    const res = await fetch(`${lcdUrl}/noble/forwarding/v1/address/${channelId}/${inputs.destinationAddress}/`)
+    if (!res.ok) throw new Error(`Failed to fetch forwarding address: ${res.status}`)
+    const data = await res.json()
+    const forwardingAddress = data?.address as string
+    if (!forwardingAddress) throw new Error('No forwarding address returned')
+
+    const mintRecipient = encodeBech32ToBytes32(forwardingAddress) as `0x${string}`
+    const destinationDomain = Number((import.meta as any)?.env?.VITE_NOBLE_DOMAIN_ID ?? 4)
+
+    // Build instructions
+    const rpcUrl = inputs.rpcUrl || 'https://api.mainnet-beta.solana.com'
+    const { state } = (await import('../../../state/AppState')).useAppState?.() || { state: null }
+    // Pull from global state if available
+    const ownerPubkey = (state as any)?.addresses?.solana as string || ''
+    if (!ownerPubkey) throw new Error('Connect a Solana wallet first')
+
+    const built = await buildSolanaDepositForBurn({
+      rpcUrl,
+      ownerPubkeyBase58: ownerPubkey,
+      amountUsdcDisplay: inputs.amount,
+      mintRecipientHex32: mintRecipient,
+      destinationDomain,
+    })
+
+    // Send transaction (wallet signs + event account partial sign)
+    const sigRes = await sendSolanaTransaction({
+      rpcUrl,
+      ownerPubkeyBase58: ownerPubkey,
+      instructions: built.instructions,
+      signWithEventAccount: { publicKey: built.eventAccount, secret: built.eventAccountSecret },
+    })
+
+    dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'pending', hash: sigRes.signature } } })
+    showToast({ title: 'Deposit', message: 'Submitted to Solana…', variant: 'info' })
+
+    // Poll confirmation
+    const poll = await pollSolanaTransaction({ rpcUrl, signature: sigRes.signature, timeoutMs: 5 * 60 * 1000, intervalMs: 3000 })
+    if (!poll.confirmed) throw new Error('Transaction not confirmed on Solana')
+
+    dispatch({ type: 'SET_TRANSACTION_STAGE', payload: { id: txId, stage: 'Burned on Solana' } })
+    dispatch({ type: 'SET_TRANSACTION_STATUS', payload: { id: txId, status: 'pending' } })
+    showToast({ title: 'Deposit', message: 'Burned on Solana; waiting for forwarding', variant: 'success' })
+  } catch (err: any) {
+    dispatch({ type: 'UPDATE_TRANSACTION', payload: { id: txId, changes: { status: 'error', errorMessage: err?.message ?? 'Solana deposit failed' } } })
+    showToast({ title: 'Deposit Failed', message: err?.message ?? 'Solana transaction failed', variant: 'error' })
   }
 }
 

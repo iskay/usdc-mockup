@@ -319,6 +319,48 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
     } catch {}
   }
 
+  // --- Solana connect (Wallet Standard + injected) ---
+  const connectSolana = async () => {
+    try {
+      const { connectSolanaWallet, isSolanaProviderDetected } = await import('../../utils/solanaWallet')
+      if (!isSolanaProviderDetected()) {
+        showToast({ title: 'Solana Wallet', message: 'No Solana wallet detected. Install MetaMask (Solana) or Phantom.', variant: 'error' })
+        return
+      }
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { solana: 'connecting' } as any })
+      const res = await connectSolanaWallet()
+      if (res?.publicKey) {
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { solana: 'connected' } as any })
+        dispatch({ type: 'SET_ADDRESSES', payload: { ...addressesRef.current, solana: res.publicKey } as any })
+        showToast({ title: 'Solana', message: `Connected: ${res.publicKey.slice(0, 6)}...${res.publicKey.slice(-4)}`, variant: 'success' })
+        // Fetch balances
+        try {
+          const { fetchSolanaBalances } = await import('../../utils/solanaBalance')
+          const { SOLANA_MAINNET } = await import('../../config/solana')
+          const bal = await fetchSolanaBalances({ rpcUrl: SOLANA_MAINNET.rpcUrls[0], ownerPubkeyBase58: res.publicKey, usdcMintBase58: SOLANA_MAINNET.contracts.usdc })
+          const usdc = (Number(bal.usdcAmountBaseUnits) / 1e6).toFixed(6)
+          dispatch({ type: 'MERGE_BALANCES', payload: { solana: { usdc } } as any })
+        } catch {}
+      } else {
+        dispatch({ type: 'SET_WALLET_CONNECTION', payload: { solana: 'disconnected' } as any })
+      }
+    } catch (err: any) {
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { solana: 'error' } as any })
+      showToast({ title: 'Solana', message: err?.message ?? 'Unable to connect Solana wallet', variant: 'error' })
+    } finally {
+      setOpenConnect(false)
+    }
+  }
+
+  const disconnectSolana = async () => {
+    try {
+      dispatch({ type: 'SET_WALLET_CONNECTION', payload: { solana: 'disconnected' } as any })
+      dispatch({ type: 'SET_ADDRESSES', payload: { ...addressesRef.current, solana: '' } as any })
+      dispatch({ type: 'MERGE_BALANCES', payload: { solana: { usdc: '--' } } as any })
+      showToast({ title: 'Solana', message: 'Disconnected', variant: 'success' })
+    } catch {}
+  }
+
   return (
     <>
     <header className="sticky top-0 z-40 flex h-20 items-center bg-header-bg justify-between px-16 border-b-2 border-header-border">
@@ -413,6 +455,26 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
                     <span>Namada Keychain</span>
                   </span>
                   {state.walletConnections.namada === 'connected' ? (
+                    <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const isConn = (state.walletConnections as any)?.solana === 'connected'
+                    if (isConn) {
+                      void disconnectSolana()
+                    } else {
+                      void connectSolana()
+                    }
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl px-2 py-2 text-left text-sm hover:bg-button-active/10"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <img src="/solana-logo.svg" alt="" className="h-4 w-4" />
+                    <span>Solana Wallet</span>
+                  </span>
+                  {(state.walletConnections as any)?.solana === 'connected' ? (
                     <span className="h-2 w-2 rounded-full bg-emerald-400" />
                   ) : null}
                 </button>

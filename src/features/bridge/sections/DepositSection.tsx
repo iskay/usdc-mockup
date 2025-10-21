@@ -12,7 +12,7 @@ import { getChainOptions } from '../config'
 import { useEvmConfig } from '../../../state/EvmConfigProvider'
 import { validateAmount, validateForm } from '../utils/validation'
 import { getNamadaTxExplorerUrl } from '../../../utils/explorer'
-import { getEvmTxUrl, getChainDisplayName } from '../../../utils/chain'
+import { getEvmTxUrl, getChainDisplayName, getSolanaTxUrl } from '../../../utils/chain'
 import { GaslessToggle } from '../components/GaslessToggle'
 import { startGaslessDepositAction } from '../services/gaslessActions'
 
@@ -253,12 +253,19 @@ const DepositSection: React.FC<Props> = ({
             <div className="flex justify-center">
               <Button
                 variant="submit"
-                disabled={!validation.isValid || !isMetaMaskConnected}
+                disabled={!validation.isValid || (chain !== 'solana' && !isMetaMaskConnected)}
                 onClick={async () => {
+                  if (chain === 'solana') {
+                    // BridgeForm will route to Solana deposit action when chain === 'solana'
+                    // We call the parent handler indirectly by reusing the EVM handler switch in BridgeForm
+                    // It checks the chain before invoking
+                    // So just call onStartEvmDeposit which will dispatch solana flow when chain === 'solana'
+                    void onStartEvmDeposit()
+                    return
+                  }
                   if (gaslessEnabled) {
-                    // Execute gas-less deposit action
                     await startGaslessDepositAction({
-                      sdk: null, // Not needed for gas-less transactions
+                      sdk: null,
                       state,
                       dispatch,
                       showToast,
@@ -276,7 +283,7 @@ const DepositSection: React.FC<Props> = ({
                 }}
                 leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
               >
-                {gaslessEnabled ? 'Transfer with USDC' : 'Deposit USDC'}
+                {gaslessEnabled && chain !== 'solana' ? 'Transfer with USDC' : 'Deposit USDC'}
               </Button>
             </div>
           )
@@ -305,22 +312,22 @@ const DepositSection: React.FC<Props> = ({
                   }
                 </span></div>
                 <div className="flex justify-between"><span>
-                  {latestDepositTx?.evm ? 
-                    `${getChainDisplayName(latestDepositTx.evm.chain)} Send Tx` :
-                    `${getChainDisplayName(chain)} Send Tx`
-                  }
+                  {`${getChainDisplayName(chain)} Send Tx`}
                 </span><span className="font-mono text-xs text-foreground flex items-center gap-2">
-                  <InlineHash 
-                    value={latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash as string | undefined} 
-                    explorerUrl={
-                      (latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash) ? 
-                        getEvmTxUrl(
-                          latestDepositTx?.evm?.chain || chain, 
-                          latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash as string
-                        ) : 
-                        undefined
-                    } 
-                  />
+                  {(() => {
+                    // Prefer EVM explorer if evm field/hash present
+                    const evmHash = latestDepositTx?.evm?.hash || latestDepositTx?.sepoliaHash
+                    if (evmHash) {
+                      const url = getEvmTxUrl(latestDepositTx?.evm?.chain || chain, evmHash)
+                      return <InlineHash value={evmHash} explorerUrl={url} />
+                    }
+                    // If Solana deposit, show Solana signature link from tx hash
+                    if (chain === 'solana' && latestDepositTx?.hash) {
+                      const url = getSolanaTxUrl(latestDepositTx.hash)
+                      return <InlineHash value={latestDepositTx.hash} explorerUrl={url} />
+                    }
+                    return <InlineHash value={undefined} explorerUrl={undefined} />
+                  })()}
                 </span></div>
                 <div className="flex justify-between"><span>Namada Receive Tx</span><span className="font-mono text-xs text-foreground flex items-center gap-2">
                   <InlineHash

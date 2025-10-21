@@ -10,6 +10,7 @@ export type ChainBalances = {
   polygon: { usdc: string }
   arbitrum: { usdc: string }
   sepolia: { usdc: string }
+  solana?: { usdc: string }
   // kept for backward compatibility in places still using "noble"
   noble?: { usdc: string }
   namada: { usdcTransparent: string; usdcShielded: string; namTransparent: string; namShielded: string }
@@ -18,6 +19,7 @@ export type ChainBalances = {
 export type WalletConnections = {
   metamask: WalletConnectionStatus
   namada: WalletConnectionStatus
+  solana?: WalletConnectionStatus
 }
 
 export type TxStatus = 'idle' | 'pending' | 'success' | 'error'
@@ -60,6 +62,7 @@ export type AppState = {
     polygon: string
     arbitrum: string
     sepolia: string
+    solana?: string
     namada: { transparent: string; shielded: string }
   }
 }
@@ -94,12 +97,14 @@ const initialState: AppState = {
     polygon: { usdc: '--' },
     arbitrum: { usdc: '--' },
     sepolia: { usdc: '--' },
+    solana: { usdc: '--' },
     noble: { usdc: '--' },
     namada: { usdcTransparent: '--', usdcShielded: '--', namTransparent: '--', namShielded: '--' },
   },
   walletConnections: {
     metamask: 'disconnected',
     namada: 'disconnected',
+    solana: 'disconnected',
   },
   txStatus: 'idle',
   transactions: [],
@@ -112,6 +117,7 @@ const initialState: AppState = {
     polygon: '',
     arbitrum: '',
     sepolia: '',
+    solana: '',
     namada: {
       transparent: '',
       shielded: '',

@@ -1,4 +1,5 @@
 import { getEvmChain, type EvmChainConfig } from '../config/evmChains';
+import { getSolanaChain } from '../config/solana';
 
 /**
  * Get EVM transaction explorer URL for a given chain and transaction hash
@@ -134,6 +135,31 @@ export function getChainId(chainKey: string): number | undefined {
 export function getChainIdHex(chainKey: string): string | undefined {
   const chain = getEvmChain(chainKey);
   return chain?.chainIdHex;
+}
+
+/**
+ * Get Solana transaction explorer URL for a given signature
+ * Supports cluster query param for non-mainnet clusters
+ */
+export function getSolanaTxUrl(signature: string, cluster?: 'mainnet-beta' | 'testnet' | 'devnet'): string | undefined {
+  const sol = cluster === 'devnet' ? getSolanaChain('solana-devnet') : getSolanaChain('solana');
+  const base = sol?.explorer.baseUrl?.replace(/\/$/, '');
+  if (!base) return undefined;
+  const url = `${base}/tx/${signature}`;
+  if (sol?.cluster && sol.cluster !== 'mainnet-beta') return `${url}?cluster=${sol.cluster}`;
+  return url;
+}
+
+/**
+ * Get Solana address explorer URL
+ */
+export function getSolanaAddressUrl(address: string, cluster?: 'mainnet-beta' | 'testnet' | 'devnet'): string | undefined {
+  const sol = cluster === 'devnet' ? getSolanaChain('solana-devnet') : getSolanaChain('solana');
+  const base = sol?.explorer.baseUrl?.replace(/\/$/, '');
+  if (!base) return undefined;
+  const url = `${base}/address/${address}`;
+  if (sol?.cluster && sol.cluster !== 'mainnet-beta') return `${url}?cluster=${sol.cluster}`;
+  return url;
 }
 
 /**
