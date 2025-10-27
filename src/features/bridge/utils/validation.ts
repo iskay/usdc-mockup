@@ -10,6 +10,9 @@ export const validateAmount = (amount: string, availableBalance: string): Amount
   if (isNaN(numAmount) || numAmount <= 0) {
     return { isValid: false, error: 'Please enter a valid amount' }
   }
+  if (numAmount > 10) {
+    return { isValid: false, error: 'Maximum amount is 10 USDC' }
+  }
   if (numAmount > numAvailable) {
     return { isValid: false, error: 'Amount exceeds available balance' }
   }

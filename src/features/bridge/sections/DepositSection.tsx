@@ -83,7 +83,7 @@ const DepositSection: React.FC<Props> = ({
               <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
-                onClick={() => setDepositAmount(availableBalance)}
+                onClick={() => setDepositAmount(Math.min(parseFloat(availableBalance), 10).toString())}
                 disabled={!isMetaMaskConnected}
                 className={`rounded-md font-semibold px-2 py-1 text-xs text-muted-fg hover:bg-sidebar-selected ${!isMetaMaskConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
