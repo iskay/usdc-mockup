@@ -26,6 +26,10 @@
         "zeroExChainId": 1,
         "zeroExBaseUrl": "https://api.0x.org"
       },
+      "estimatedTimes": {
+        "deposit": "18 - 20 minutes",
+        "send": "2 - 4 minutes"
+      },
       "logo": "/ethereum-logo.svg",
       "testnet": false
     },
@@ -52,6 +56,10 @@
       },
       "gasless": {
         "enabled": false
+      },
+      "estimatedTimes": {
+        "deposit": "18 - 20 minutes",
+        "send": "2 - 4 minutes"
       },
       "logo": "/base-logo.svg",
       "testnet": false
@@ -80,6 +88,10 @@
       "gasless": {
         "enabled": false
       },
+      "estimatedTimes": {
+        "deposit": "2 - 3 minutes",
+        "send": "2 - 4 minutes"
+      },
       "logo": "/avax-logo.svg",
       "testnet": false
     },
@@ -106,6 +118,10 @@
       },
       "gasless": {
         "enabled": false
+      },
+      "estimatedTimes": {
+        "deposit": "2 - 3 minutes",
+        "send": "2 - 4 minutes"
       },
       "logo": "/polygon-logo.svg",
       "testnet": false

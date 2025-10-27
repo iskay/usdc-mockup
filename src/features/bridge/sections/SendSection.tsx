@@ -59,6 +59,9 @@ const SendSection: React.FC<Props> = ({
   // Generate chains dynamically from config
   const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
   
+  // Get chain config for estimated times
+  const chainConfig = config?.chains.find(c => c.key === chain)
+  
   // Show total shielded balance (no fee subtraction)
   const calculateAvailableAmount = () => {
     return availableShielded
@@ -164,7 +167,7 @@ const SendSection: React.FC<Props> = ({
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated send time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">2 - 5 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">{chainConfig?.estimatedTimes?.send ?? '2 - 5 minutes'}</span>
         </div>
       </div>
 

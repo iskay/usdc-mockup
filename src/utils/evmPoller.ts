@@ -29,7 +29,7 @@ export type EvmPollResult = {
 
 export async function pollSepoliaUsdcMint(inputs: EvmPollInputs, onUpdate?: (u: { latest?: bigint; scannedFrom?: bigint; scannedTo?: bigint }) => void): Promise<EvmPollResult> {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), inputs.timeoutMs ?? 5 * 60 * 1000)
+  const timeout = setTimeout(() => controller.abort(), inputs.timeoutMs ?? 30 * 60 * 1000)
   const intervalMs = inputs.intervalMs ?? 5000
   try {
     const zero = '0x0000000000000000000000000000000000000000'

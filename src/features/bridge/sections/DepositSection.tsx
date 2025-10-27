@@ -198,7 +198,7 @@ const DepositSection: React.FC<Props> = ({
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated deposit time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">2 - 3 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">{chainConfig?.estimatedTimes?.deposit ?? '2 - 3 minutes'}</span>
         </div>
       </div>
 
