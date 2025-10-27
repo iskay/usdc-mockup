@@ -59,35 +59,9 @@ const SendSection: React.FC<Props> = ({
   // Generate chains dynamically from config
   const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
   
-  // Calculate available amount by subtracting gas fees from shielded balance
+  // Show total shielded balance (no fee subtraction)
   const calculateAvailableAmount = () => {
-    if (availableShielded === '--' || !sendFeeEst) {
-      return availableShielded
-    }
-    
-    try {
-      const shieldedBalance = new BigNumber(availableShielded)
-      if (shieldedBalance.isLessThanOrEqualTo(0)) {
-        return availableShielded
-      }
-      
-      // Parse fee estimate (format: "$0.0843" or "0.000001 NAM")
-      let feeAmount = new BigNumber(0)
-      if (sendFeeEst.startsWith('$')) {
-        // USDC fee: "$0.0843" -> "0.0843"
-        const feeStr = sendFeeEst.slice(1)
-        feeAmount = new BigNumber(feeStr)
-      } else if (sendFeeEst.includes(' NAM')) {
-        // NAM fee: "0.000001 NAM" -> "0.000001"
-        const feeStr = sendFeeEst.replace(' NAM', '')
-        feeAmount = new BigNumber(feeStr)
-      }
-      
-      const availableAmount = BigNumber.max(shieldedBalance.minus(feeAmount), 0)
-      return availableAmount.toFixed(6)
-    } catch {
-      return availableShielded
-    }
+    return availableShielded
   }
   
   const availableAmount = calculateAvailableAmount()

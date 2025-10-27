@@ -57,9 +57,9 @@ const DepositSection: React.FC<Props> = ({
   // Generate chains dynamically from config
   const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
 
-  // Check if gas-less is supported for this chain
-  const supportedChains = ['base', 'ethereum', 'arbitrum', 'polygon']
-  const showGaslessOption = supportedChains.includes(chain) && isMetaMaskConnected
+  // Check if gas-less is supported for this chain using config
+  const chainConfig = config?.chains.find(c => c.key === chain)
+  const showGaslessOption = chainConfig?.gasless?.enabled === true && isMetaMaskConnected
 
   return (
     <div className="space-y-6 text-left">

@@ -22,21 +22,15 @@ import MoreActionsMenu from './MoreActionsMenu'
 import DepositSection from './sections/DepositSection'
 import SendSection from './sections/SendSection'
 import { debugOrbiterAction, clearShieldedContextAction, clearTxHistoryAction, sendNowViaOrbiterAction, shieldNowForTokenAction, startEvmDepositAction, connectNamadaAction, clearUnusedRefundAddressesAction } from './services/bridgeActions'
+import { useEvmConfig } from '../../state/EvmConfigProvider'
 
 export const BridgeForm: React.FC = () => {
   const { state, dispatch } = useAppState()
   const { showToast } = useToast()
   const { fetchBalances } = useBalanceService()
+  const { config: evmConfig, loading: evmConfigLoading } = useEvmConfig()
   const [activeTab, setActiveTab] = useState('deposit')
-  const [chain, setChain] = useState(() => {
-    // Use default from config, fallback to 'sepolia' if config not loaded yet
-    try {
-      const { getDefaultChain } = require('./config')
-      return getDefaultChain()
-    } catch {
-      return 'sepolia'
-    }
-  })
+  const [chain, setChain] = useState('sepolia') // Start with fallback, will be updated when config loads
   const [depositAmount, setDepositAmount] = useState('')
   const [depositAddress, setDepositAddress] = useState('')
   const [sendAmount, setSendAmount] = useState('')
@@ -56,6 +50,13 @@ export const BridgeForm: React.FC = () => {
   const moreDropdownRef = useRef<HTMLDivElement | null>(null)
   const { sdk, rpc, isReady } = useNamadaSdk()
   const { getDefaultAccount, getAccounts: getNamadaAccounts, isAvailable: isNamadaAvailable } = useNamadaKeychain()
+
+  // Update chain when EVM config loads
+  useEffect(() => {
+    if (!evmConfigLoading && evmConfig?.defaults?.selectedChainKey) {
+      setChain(evmConfig.defaults.selectedChainKey)
+    }
+  }, [evmConfig, evmConfigLoading])
 
   // Gas estimation helper moved to utils
 
@@ -92,6 +93,14 @@ export const BridgeForm: React.FC = () => {
       void fetchBalances({ kinds: ['evmUsdc'], delayMs: 100, chainKey: chain })
     }
   }, [chain, state.walletConnections.metamask])
+
+  // Fetch Namada shielded balances when Namada connects
+  useEffect(() => {
+    if (state.walletConnections.namada === 'connected' && state.addresses.namada.shielded) {
+      console.log('[BridgeForm] Namada connected, fetching shielded balances')
+      void fetchBalances({ kinds: ['namadaShieldedBalances'], delayMs: 500 })
+    }
+  }, [state.walletConnections.namada, state.addresses.namada.shielded])
 
   // Clear Namada-related local state when disconnecting
   useEffect(() => {
@@ -536,7 +545,7 @@ export const BridgeForm: React.FC = () => {
               { sdk, state, dispatch, showToast, getNamadaAccounts, getCurrentState: () => state },
               {
                 onSuccess: () => {
-                  try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 500 }) } catch {}
+                  try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam','namadaShieldedBalances'], delayMs: 500 }) } catch {}
                 }
               }
             )

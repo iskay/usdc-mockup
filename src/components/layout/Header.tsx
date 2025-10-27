@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             {
               onSuccess: () => {
                 showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
-                try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 300 }) } catch {}
+                try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam','namadaShieldedBalances'], delayMs: 300 }) } catch {}
               }
             }
           )
