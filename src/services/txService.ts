@@ -81,7 +81,7 @@ export function createTxService(dispatch: (action: any) => void) {
         forwardingAddress: ctx.forwardingAddress,
         expectedAmountUusdc,
         namadaReceiver: ctx.namadaReceiver,
-        timeoutMs: 5 * 60 * 1000,
+        timeoutMs: 30 * 60 * 1000,
         intervalMs: 5000,
       }, async (u) => {
         if (abort.signal.aborted) return
@@ -120,7 +120,7 @@ export function createTxService(dispatch: (action: any) => void) {
         namadaReceiver: ctx.namadaReceiver,
         expectedAmountUusdc: expectedAmountUusdc,
         denom: 'uusdc',
-        timeoutMs: 5 * 60 * 1000,
+        timeoutMs: 30 * 60 * 1000,
         intervalMs: 5000,
       }, (u) => { /* optional progress */ })
 

@@ -57,9 +57,9 @@ const DepositSection: React.FC<Props> = ({
   // Generate chains dynamically from config
   const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
 
-  // Check if gas-less is supported for this chain
-  const supportedChains = ['base', 'ethereum', 'arbitrum', 'polygon']
-  const showGaslessOption = supportedChains.includes(chain) && isMetaMaskConnected
+  // Check if gas-less is supported for this chain using config
+  const chainConfig = config?.chains.find(c => c.key === chain)
+  const showGaslessOption = chainConfig?.gasless?.enabled === true && isMetaMaskConnected
 
   return (
     <div className="space-y-6 text-left">
@@ -83,7 +83,7 @@ const DepositSection: React.FC<Props> = ({
               <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
-                onClick={() => setDepositAmount(availableBalance)}
+                onClick={() => setDepositAmount(Math.min(parseFloat(availableBalance), 10).toString())}
                 disabled={!isMetaMaskConnected}
                 className={`rounded-md font-semibold px-2 py-1 text-xs text-muted-fg hover:bg-sidebar-selected ${!isMetaMaskConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
@@ -198,7 +198,7 @@ const DepositSection: React.FC<Props> = ({
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated deposit time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">2 - 3 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">{chainConfig?.estimatedTimes?.deposit ?? '2 - 3 minutes'}</span>
         </div>
       </div>
 

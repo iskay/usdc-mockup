@@ -29,7 +29,7 @@ export type NamadaDepositTrackResult = {
 }
 
 export async function pollNamadaForDeposit(inputs: NamadaDepositTrackInputs, onUpdate?: (u: { height: number; ackFound?: boolean; namadaTxHash?: string }) => void): Promise<NamadaDepositTrackResult> {
-  const timeoutMs = inputs.timeoutMs ?? 5 * 60 * 1000
+  const timeoutMs = inputs.timeoutMs ?? 30 * 60 * 1000
   const intervalMs = inputs.intervalMs ?? 5000
   const deadline = Date.now() + timeoutMs
   let nextHeight = inputs.startHeight

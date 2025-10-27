@@ -132,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             {
               onSuccess: () => {
                 showToast({ title: 'Namada Keychain', message: 'Reconnected', variant: 'success' })
-                try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam'], delayMs: 300 }) } catch {}
+                try { void fetchBalances({ kinds: ['namadaTransparentUsdc','namadaTransparentNam','namadaShieldedBalances'], delayMs: 300 }) } catch {}
               }
             }
           )
@@ -441,13 +441,13 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             {/* Placeholder rich content; update as needed */}
             <h1 className="text-xl font-bold mb-2 text-accent-green">Welcome to USDC.delivery</h1>
             <p className="mb-3 text-sm">
-              This small demo app is meant to show the potential of using Namada's shielded pool to privately send and receive USDC from multiple EVM chains, quickly and easily. Noble's 'grand-1' testnet is used as a forwarding intermediary to/from Namada's 'housefire' testnet.
+              This small demo app is meant to show the potential of using Namada's shielded pool to privately send and receive USDC from multiple EVM chains, quickly and easily. Noble chain is used as a forwarding intermediary to/from Namada's mainnet.
+            </p>
+            <p className="mb-3 text-sm font-bold text-accent-yellow">
+              This experiemental version of the app uses mainnet USDC assets and may contain bugs or glitches rendering funds unrecoverable. Do not send more than you're prepared to forfeit.
             </p>
             <p className="mb-3 text-sm">
-              Only testnet assets are used in this demo. You can request testnet USDC from https://faucet.circle.com.
-            </p>
-            <p className="mb-3 text-sm">
-              <span className='font-bold'>NOTE:</span> 'Gasless' USDC transactions haven't been implemented in the testnet version of this app, so you'll also need some native token balance on your EVM deposit chain for transaction fees.
+              <span className='font-bold'>NOTE:</span> 'Gasless' USDC transactions are coming soon, but for now you'll also need some native token balance on your EVM deposit chain for transaction fees.
             </p>
             <p className="mb-3 text-left text-white/90 text-lg">
               How to Use:
@@ -455,12 +455,12 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange }) => {
             <ol className="list-decimal pl-5 space-y-1 text-sm text-left">
               <li>Connect MetaMask and Namada Keychain using the button in the top right.</li>
               <li>Deposit USDC by selecting an EVM source chain and amount. Use the 'Auto Fill' button to enter your Namada transparent address as the destination. Click 'Deposit USDC.'</li>
-              <li>You'll be asked to sign a <span className='font-semibold'>depositForBurn</span> transaction on the source EVM chain, and the funds will be forwarded (via Noble testnet) to Namada. After a few minutes, the USDC will appear in your Namada transparent balance.</li>
+              <li>You'll be asked to sign a <span className='font-semibold'>depositForBurn</span> transaction on the source EVM chain, and the funds will be forwarded (via Noble) to Namada. The USDC will appear in your Namada transparent balance. On Eth Mainnet and Base, this will take up to 20 minutes; Avalanche and Polygon 5 minutes or less.</li>
               <li>Click 'Shield Now' to move your Namada transparent balance to your shielded balance.</li>
               <li>You can now make shielded payments to any of the available EVM chains. Click the 'Send' tab to switch to the payment view.</li>
               <li>Before sending a shielded payment, it's recommended to click the 'Shielded Sync' button to make sure your shielded context is up to date. The first time you sync will take several minutes, but subsequent syncs will be much faster.</li>
               <li>Enter an amount and select a destination EVM chain and address. Then click the 'Send USDC' button.</li>
-              <li>You'll be asked to approve a Namada Unshielding IBC transaction to Noble testnet, which will auto-forward your funds to the final destination within a few minutes.</li>
+              <li>You'll be asked to approve a Namada Unshielding IBC transaction to Noble, which will auto-forward your funds to the final destination within a few minutes.</li>
             </ol>
           </div>
           <div className="px-5 py-4 border-t border-border-muted flex justify-end">

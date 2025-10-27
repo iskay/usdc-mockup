@@ -34,7 +34,7 @@ export async function fetchLatestHeight(nobleRpc: string): Promise<number> {
 }
 
 export async function pollNobleForOrbiter(inputs: NobleTrackInputs, onUpdate?: (u: { height: number; ackFound?: boolean; cctpFound?: boolean }) => void): Promise<NobleTrackResult> {
-  const timeoutMs = inputs.timeoutMs ?? 5 * 60 * 1000
+  const timeoutMs = inputs.timeoutMs ?? 30 * 60 * 1000
   const intervalMs = inputs.intervalMs ?? 5000
   const deadline = Date.now() + timeoutMs
   let nextHeight = inputs.startHeight
@@ -151,7 +151,7 @@ export type NobleDepositTrackResult = {
 }
 
 export async function pollNobleForDeposit(inputs: NobleDepositTrackInputs, onUpdate?: (u: { height: number; receivedFound?: boolean; forwardFound?: boolean }) => void): Promise<NobleDepositTrackResult> {
-  const timeoutMs = inputs.timeoutMs ?? 5 * 60 * 1000
+  const timeoutMs = inputs.timeoutMs ?? 30 * 60 * 1000
   const intervalMs = inputs.intervalMs ?? 5000
   const deadline = Date.now() + timeoutMs
   let nextHeight = inputs.startHeight

@@ -19,6 +19,7 @@ export type EvmChainConfig = {
     messageTransmitter?: string;
   };
   gasless?: { enabled: boolean; zeroExChainId?: number; zeroExBaseUrl?: string };
+  estimatedTimes?: { deposit: string; send: string };
   logo?: string;
   testnet?: boolean;
 };

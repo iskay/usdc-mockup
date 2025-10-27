@@ -59,35 +59,12 @@ const SendSection: React.FC<Props> = ({
   // Generate chains dynamically from config
   const chains = config ? getChainOptions() : [{ label: 'Sepolia', value: 'sepolia', iconUrl: '/ethereum-logo.svg' }]
   
-  // Calculate available amount by subtracting gas fees from shielded balance
+  // Get chain config for estimated times
+  const chainConfig = config?.chains.find(c => c.key === chain)
+  
+  // Show total shielded balance (no fee subtraction)
   const calculateAvailableAmount = () => {
-    if (availableShielded === '--' || !sendFeeEst) {
-      return availableShielded
-    }
-    
-    try {
-      const shieldedBalance = new BigNumber(availableShielded)
-      if (shieldedBalance.isLessThanOrEqualTo(0)) {
-        return availableShielded
-      }
-      
-      // Parse fee estimate (format: "$0.0843" or "0.000001 NAM")
-      let feeAmount = new BigNumber(0)
-      if (sendFeeEst.startsWith('$')) {
-        // USDC fee: "$0.0843" -> "0.0843"
-        const feeStr = sendFeeEst.slice(1)
-        feeAmount = new BigNumber(feeStr)
-      } else if (sendFeeEst.includes(' NAM')) {
-        // NAM fee: "0.000001 NAM" -> "0.000001"
-        const feeStr = sendFeeEst.replace(' NAM', '')
-        feeAmount = new BigNumber(feeStr)
-      }
-      
-      const availableAmount = BigNumber.max(shieldedBalance.minus(feeAmount), 0)
-      return availableAmount.toFixed(6)
-    } catch {
-      return availableShielded
-    }
+    return availableShielded
   }
   
   const availableAmount = calculateAvailableAmount()
@@ -113,7 +90,7 @@ const SendSection: React.FC<Props> = ({
               <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
-                onClick={() => setSendAmount(availableAmount)}
+                onClick={() => setSendAmount(Math.min(parseFloat(availableAmount), 10).toString())}
                 disabled={!isNamadaConnected}
                 className={`rounded-md font-semibold px-2 py-1 text-xs text-muted-fg hover:bg-sidebar-selected ${!isNamadaConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
@@ -190,7 +167,7 @@ const SendSection: React.FC<Props> = ({
             <i className="fa-solid fa-stopwatch text-foreground-secondary text-xs"></i>
             <div className="info-text text-foreground-secondary">Estimated send time</div>
           </div>
-          <span className="info-text font-semibold text-muted-fg">2 - 5 minutes</span>
+          <span className="info-text font-semibold text-muted-fg">{chainConfig?.estimatedTimes?.send ?? '2 - 5 minutes'}</span>
         </div>
       </div>
 

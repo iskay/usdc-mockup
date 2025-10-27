@@ -48,7 +48,7 @@ export function buildOrbiterCctpMemo(params: CctpMemoParams): string {
   
   const callerB64 = callerHex && callerHex.length > 0
     ? base64Encode(leftPadTo32Bytes(hexToBytes(callerHex)))
-    : ''
+    : null
 
   const memo = {
     orbiter: {
