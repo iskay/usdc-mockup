@@ -5,9 +5,12 @@ export type SupportedChain = string
 
 export function getChainId(chain: string): number {
   const config = getEvmChain(chain)
+  console.log('[GaslessUtils] getChainId called with chain:', chain)
+  console.log('[GaslessUtils] getEvmChain result:', config)
   if (!config) {
     throw new Error(`Unsupported chain: ${chain}`)
   }
+  console.log('[GaslessUtils] returning chainId:', config.chainId)
   return config.chainId
 }
 

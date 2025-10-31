@@ -520,7 +520,7 @@ export async function shieldNowForTokenAction({ sdk, state, dispatch, showToast 
   }
 }
 
-export async function startEvmDepositAction({ sdk, dispatch, showToast }: Deps, inputs: DepositInputs & { chainKey: string }) {
+export async function startEvmDepositAction({ sdk, dispatch, showToast, getCurrentState }: Deps, inputs: DepositInputs & { chainKey: string }) {
   // Generate unique transaction ID with timestamp + random component
   const txId = inputs.txId || `dep_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   
@@ -535,21 +535,39 @@ export async function startEvmDepositAction({ sdk, dispatch, showToast }: Deps, 
 
     // Fetch the current Namada chain ID
     const chainId = await fetchChainIdFromRpcDirect()
-  dispatch({
-    type: 'ADD_TRANSACTION',
-    payload: {
-      id: txId,
-      kind: 'deposit',
-      amount: inputs.amount,
-      fromChain: inputs.chainKey,
-      toChain: 'namada',
-      destination: inputs.destinationAddress,
-      status: 'submitting',
-      namadaChainId: chainId,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    },
-  })
+  
+  // Only add transaction if not already added (e.g., by gasless flow)
+  const existing = (() => {
+    try { return Boolean(getCurrentState?.().transactions?.some((t: any) => t.id === txId)) } catch { return false }
+  })()
+  if (!existing) {
+    dispatch({
+      type: 'ADD_TRANSACTION',
+      payload: {
+        id: txId,
+        kind: 'deposit',
+        amount: inputs.amount,
+        fromChain: inputs.chainKey,
+        toChain: 'namada',
+        destination: inputs.destinationAddress,
+        status: 'submitting',
+        namadaChainId: chainId,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    })
+  } else {
+    // Update existing transaction with chain ID
+    dispatch({
+      type: 'UPDATE_TRANSACTION',
+      payload: {
+        id: txId,
+        changes: {
+          namadaChainId: chainId,
+        },
+      },
+    })
+  }
 
   const forwardingAddress = await (async () => {
     const channelId = (import.meta as any)?.env?.VITE_NOBLE_TO_NAMADA_CHANNEL || 'channel-136'

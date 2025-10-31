@@ -7,7 +7,21 @@ import Spinner from '../../components/ui/Spinner'
 
 export const HistoryPage: React.FC = () => {
   const { state } = useAppState()
-  const txs = state.transactions
+  // Deduplicate transactions by id and keep the most recent (by updatedAt/createdAt)
+  const txs = React.useMemo(() => {
+    const latestById = new Map<string, any>()
+    for (const tx of state.transactions) {
+      const prev = latestById.get(tx.id)
+      const currTs = (tx.updatedAt ?? tx.createdAt) as number
+      const prevTs = prev ? ((prev.updatedAt ?? prev.createdAt) as number) : -1
+      if (!prev || currTs > prevTs) {
+        latestById.set(tx.id, tx)
+      }
+    }
+    const arr = Array.from(latestById.values())
+    arr.sort((a, b) => ((b.updatedAt ?? b.createdAt) as number) - ((a.updatedAt ?? a.createdAt) as number))
+    return arr
+  }, [state.transactions])
   const fmt = (n: number) => new Date(n).toLocaleString()
   return (
     <div className="space-y-4">
@@ -25,6 +39,10 @@ export const HistoryPage: React.FC = () => {
           <div className="divide-y divide-border-muted">
             {txs.map((tx) => {
               const label = tx.kind === 'deposit' ? `${tx.fromChain} → Namada` : `Namada → ${tx.toChain}`
+              // Format amount: shield transactions store in base units (1e6), others are already formatted
+              const displayAmount = (tx as any).kind === 'shield'
+                ? (parseFloat(tx.amount as string) / 1e6).toFixed(6).replace(/\.?0+$/, '')
+                : tx.amount
               return (
                 <div key={tx.id} className="flex items-start gap-4 p-4">
                   <span className="mt-1">
@@ -38,7 +56,7 @@ export const HistoryPage: React.FC = () => {
                   </span>
                   <div className="flex-1">
                     <div className="flex justify-between">
-                      <div className="text-sm font-semibold text-foreground">{tx.kind.toUpperCase()} • {tx.amount} USDC</div>
+                      <div className="text-sm font-semibold text-foreground">{tx.kind.toUpperCase()} • {displayAmount} USDC</div>
                       <div className="text-xs text-foreground-secondary">{fmt(tx.createdAt)}</div>
                     </div>
                     <div className="text-sm text-foreground-secondary mt-1">

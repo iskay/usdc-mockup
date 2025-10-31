@@ -4,6 +4,7 @@ export interface GaslessConfig {
   buyToken: string   // Native ETH
   sellAmount: string
   taker: string
+  actionsString?: string
   actions?: Array<{
     type: 'contractCall'
     target: string
@@ -94,7 +95,7 @@ export class GaslessApiService {
   
   constructor() {
     // Use your existing backend for all environments
-    this.baseUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080'
+    this.baseUrl = import.meta.env.VITE_BACKEND_BASE || 'http://localhost:8080'
   }
   
   async getPrice(params: GaslessConfig): Promise<GaslessPrice> {
@@ -106,14 +107,21 @@ export class GaslessApiService {
       taker: params.taker,
     })
     
-    if (params.actions) {
+    if (params.actionsString) {
+      searchParams.set('actions', params.actionsString)
+    } else if (params.actions) {
       searchParams.set('actions', JSON.stringify(params.actions))
     }
     
     const response = await fetch(`${this.baseUrl}/api/gasless/price?${searchParams.toString()}`)
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || 'Price fetch failed')
+      let errorText = ''
+      try { 
+        const err = await response.json()
+        // Backend returns { error: ..., message: "0x API error: ..." }
+        errorText = err?.message || err?.error || ''
+      } catch {}
+      throw new Error(errorText || 'Price fetch failed')
     }
     return response.json()
   }
@@ -127,27 +135,39 @@ export class GaslessApiService {
       taker: params.taker,
     })
     
-    if (params.actions) {
+    if (params.actionsString) {
+      searchParams.set('actions', params.actionsString)
+    } else if (params.actions) {
       searchParams.set('actions', JSON.stringify(params.actions))
     }
     
     const response = await fetch(`${this.baseUrl}/api/gasless/quote?${searchParams.toString()}`)
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || 'Quote fetch failed')
+      let errorText = ''
+      try { 
+        const err = await response.json()
+        // Backend returns { error: ..., message: "0x API error: ..." }
+        errorText = err?.message || err?.error || ''
+      } catch {}
+      throw new Error(errorText || 'Quote fetch failed')
     }
     return response.json()
   }
   
-  async submitTransaction(payload: { tradeHash: string; signatures: any[] }): Promise<{ tradeHash: string }> {
+  async submitTransaction(payload: any): Promise<{ tradeHash: string }> {
     const response = await fetch(`${this.baseUrl}/api/gasless/submit`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
     if (!response.ok) {
-      const error = await response.json()
-      throw new Error(error.message || 'Submit failed')
+      let errorText = ''
+      try { 
+        const err = await response.json()
+        // Backend returns { error: ..., message: "0x API error: ..." }
+        errorText = err?.message || err?.error || ''
+      } catch {}
+      throw new Error(errorText || 'Submit failed')
     }
     return response.json()
   }

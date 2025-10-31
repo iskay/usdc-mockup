@@ -1,6 +1,7 @@
 import React from 'react'
 import { useGaslessFeeEstimate } from '../hooks/useGaslessFeeEstimate'
 import Spinner from '../../../components/ui/Spinner'
+import { useEvmConfig } from '../../../state/EvmConfigProvider'
 
 interface GaslessToggleProps {
   enabled: boolean
@@ -19,6 +20,10 @@ export const GaslessToggle: React.FC<GaslessToggleProps> = ({
   userAddress,
   availableBalance
 }) => {
+  const { config } = useEvmConfig()
+  const chainConfig = config?.chains.find(c => c.key === chain)
+  const nativeTokenSymbol = chainConfig?.nativeCurrency?.symbol || 'ETH'
+  
   const { gasFeeEth, swapAmountUsdc, totalUsdcNeeded, isLoading, error } = useGaslessFeeEstimate(
     chain,
     amount,
@@ -45,7 +50,7 @@ export const GaslessToggle: React.FC<GaslessToggleProps> = ({
             Pay gas fees with USDC
           </div>
           <div className="text-sm text-gray-600 dark:text-gray-400">
-            No ETH needed in your wallet
+            No {nativeTokenSymbol} needed in your wallet
           </div>
           
           {enabled && (
@@ -67,7 +72,7 @@ export const GaslessToggle: React.FC<GaslessToggleProps> = ({
                   </div>
                   <div className="flex justify-between">
                     <span>Estimated gas fee:</span>
-                    <span>{gasFeeEth} ETH</span>
+                    <span>{gasFeeEth} {nativeTokenSymbol}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>USDC to swap for gas:</span>
@@ -94,8 +99,8 @@ export const GaslessToggle: React.FC<GaslessToggleProps> = ({
       {enabled && !isLoading && !error && (
         <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md">
           <div className="text-sm text-blue-800 dark:text-blue-200">
-            <strong>How it works:</strong> We'll automatically convert some of your USDC to ETH 
-            to pay for gas fees, then complete your transfer. No manual ETH purchase needed!
+            <strong>How it works:</strong> We'll automatically convert some of your USDC to {nativeTokenSymbol} to
+            pay for gas fees, then complete your transfer. No manual {nativeTokenSymbol} purchase needed!
           </div>
         </div>
       )}

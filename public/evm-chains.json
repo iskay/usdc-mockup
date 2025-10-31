@@ -22,7 +22,7 @@
         "tokenMessenger": "0xBd3fa81B58Ba92a82136038B25aDec7066af3155"
       },
       "gasless": {
-        "enabled": false,
+        "enabled": true,
         "zeroExChainId": 1,
         "zeroExBaseUrl": "https://api.0x.org"
       },
@@ -55,7 +55,9 @@
         "tokenMessenger": "0x1682Ae6375C4E4A97e4B583BC394c861A46D8962"
       },
       "gasless": {
-        "enabled": false
+        "enabled": true,
+        "zeroExChainId": 8453,
+        "zeroExBaseUrl": "https://api.0x.org"
       },
       "estimatedTimes": {
         "deposit": "18 - 20 minutes",
@@ -86,7 +88,9 @@
         "tokenMessenger": "0x6B25532e1060CE10cc3B0A99e5683b91BFDe6982"
       },
       "gasless": {
-        "enabled": false
+        "enabled": true,
+        "zeroExChainId": 43114,
+        "zeroExBaseUrl": "https://api.0x.org"
       },
       "estimatedTimes": {
         "deposit": "2 - 3 minutes",
@@ -117,7 +121,9 @@
         "tokenMessenger": "0x9daF8c91AEFAE50b9c0E69629D3F6Ca40cA3B3FE"
       },
       "gasless": {
-        "enabled": false
+        "enabled": true,
+        "zeroExChainId": 137,
+        "zeroExBaseUrl": "https://api.0x.org"
       },
       "estimatedTimes": {
         "deposit": "2 - 3 minutes",

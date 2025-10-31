@@ -276,7 +276,7 @@ const DepositSection: React.FC<Props> = ({
                 }}
                 leftIcon={<img src="/rocket.svg" alt="" className="h-5 w-5" />}
               >
-                {gaslessEnabled ? 'Transfer with USDC' : 'Deposit USDC'}
+                Deposit USDC
               </Button>
             </div>
           )
