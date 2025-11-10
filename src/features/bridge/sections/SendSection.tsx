@@ -90,7 +90,7 @@ const SendSection: React.FC<Props> = ({
               <span className="text-xs font-semibold text-muted-fg">USDC</span>
               <button
                 type="button"
-                onClick={() => setSendAmount(availableAmount)}
+                onClick={() => setSendAmount(Math.min(parseFloat(availableAmount), 10).toString())}
                 disabled={!isNamadaConnected}
                 className={`rounded-md font-semibold px-2 py-1 text-xs text-muted-fg hover:bg-sidebar-selected ${!isNamadaConnected ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
